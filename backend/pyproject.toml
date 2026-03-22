@@ -39,6 +39,8 @@ dependencies = [
     "python-telegram-bot>=21.0",
     "langgraph-sdk>=0.1.51",
     "markdown-to-mrkdwn>=0.3.1",
+    "ib-insync>=0.9.86",
+    "apscheduler>=3.11.2",
 ]
 
 [dependency-groups]

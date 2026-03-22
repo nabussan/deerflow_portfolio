@@ -81,4 +81,8 @@ def get_available_tools(
         builtin_tools.append(view_image_tool)
         logger.info(f"Including view_image_tool for model '{model_name}' (supports_vision=True)")
 
-    return loaded_tools + builtin_tools + mcp_tools
+    return loaded_tools + builtin_tools + mcp_tools + IBKR_TOOLS
+
+
+# IBKR Tools
+from src.tools.ibkr_tool import IBKR_TOOLS
