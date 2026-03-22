@@ -1,0 +1,71 @@
+models:
+  - name: grok
+    display_name: Grok 4.1 Fast
+    use: langchain_openai:ChatOpenAI
+    model: grok-4-1-fast
+    api_key: $XAI_API_KEY
+    base_url: https://api.x.ai/v1
+    max_tokens: 8192
+    temperature: 0.7
+
+tool_groups:
+  - name: web
+  - name: file:read
+  - name: file:write
+  - name: bash
+
+tools:
+  - name: web_search
+    group: web
+    use: src.community.tavily.tools:web_search_tool
+    max_results: 5
+
+  - name: web_fetch
+    group: web
+    use: src.community.jina_ai.tools:web_fetch_tool
+    timeout: 10
+
+  - name: image_search
+    group: web
+    use: src.community.image_search.tools:image_search_tool
+    max_results: 5
+
+  - name: ls
+    group: file:read
+    use: src.sandbox.tools:ls_tool
+
+  - name: read_file
+    group: file:read
+    use: src.sandbox.tools:read_file_tool
+
+  - name: write_file
+    group: file:write
+    use: src.sandbox.tools:write_file_tool
+
+  - name: str_replace
+    group: file:write
+    use: src.sandbox.tools:str_replace_tool
+
+  - name: bash
+    group: bash
+    use: src.sandbox.tools:bash_tool
+
+sandbox:
+  use: src.sandbox.local:LocalSandboxProvider
+
+skills:
+  container_path: /mnt/skills
+
+title:
+  enabled: true
+  max_words: 6
+  max_chars: 60
+
+memory:
+  enabled: true
+  storage_path: memory.json
+  debounce_seconds: 30
+  max_facts: 100
+  fact_confidence_threshold: 0.7
+  injection_enabled: true
+  max_injection_tokens: 2000
