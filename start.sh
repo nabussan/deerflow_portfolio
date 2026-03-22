@@ -3,7 +3,7 @@ echo "Starting DeerFlow..."
 # See INSTALL.md for setup instructions
 
 # LangGraph Backend
-cd /home/python/deer-flow/backend
+cd $(eval echo ~$(whoami))/deer-flow/backend
 uv run langgraph dev --port 2024 --no-browser --allow-blocking > /tmp/langgraph.log 2>&1 &uv run langgraph dev --port 2024 --no-browser --allow-blocking > /tmp/langgraph.log 2>&1 &
 echo "LangGraph PID: $!"
 
@@ -16,7 +16,7 @@ echo "Gateway PID: $!"
 sleep 3
 
 # Frontend
-cd /home/python/deer-flow/frontend
+cd $(eval echo ~$(whoami))/deer-flow/frontend
 pnpm dev > /tmp/frontend.log 2>&1 &
 echo "Frontend PID: $!"
 
