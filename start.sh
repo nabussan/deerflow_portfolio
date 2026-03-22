@@ -1,5 +1,6 @@
 #!/bin/bash
 echo "Starting DeerFlow..."
+# See INSTALL.md for setup instructions
 
 # LangGraph Backend
 cd /home/python/deer-flow/backend
