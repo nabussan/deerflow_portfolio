@@ -1,25 +1,22 @@
 #!/bin/bash
-echo "Starting DeerFlow..."
 # See INSTALL.md for setup instructions
+echo "Starting DeerFlow..."
 
 # LangGraph Backend
 cd $(eval echo ~$(whoami))/deer-flow/backend
-uv run langgraph dev --port 2024 --no-browser --allow-blocking > /tmp/langgraph.log 2>&1 &uv run langgraph dev --port 2024 --no-browser --allow-blocking > /tmp/langgraph.log 2>&1 &
+uv run langgraph dev --port 2024 --no-browser --allow-blocking > /tmp/langgraph.log 2>&1 &
 echo "LangGraph PID: $!"
-
 sleep 5
 
 # Gateway
 uv run uvicorn src.gateway.app:app --host 0.0.0.0 --port 8001 > /tmp/gateway.log 2>&1 &
 echo "Gateway PID: $!"
-
 sleep 3
 
 # Frontend
 cd $(eval echo ~$(whoami))/deer-flow/frontend
-pnpm dev > /tmp/frontend.log 2>&1 &
+pnpm dev --hostname 0.0.0.0 > /tmp/frontend.log 2>&1 &
 echo "Frontend PID: $!"
-
 sleep 5
 
 echo ""
