@@ -4,7 +4,6 @@ Läuft täglich um 08:00, 15:00 und 21:00
 Prüft Positionen auf kritische Signale und sendet Telegram-Alerts.
 """
 
-import logging
 import os
 from datetime import datetime
 
@@ -13,11 +12,11 @@ from langchain_openai import ChatOpenAI
 from apscheduler.schedulers.blocking import BlockingScheduler
 
 from src.tools.ibkr_connection import get_ibkr_connection, send_telegram
+from src.tools.logger import get_logger  # v0.1.1
 
 load_dotenv("/home/python/deer-flow/backend/.env")
 
-logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO)
+logger = get_logger("portfolio_monitor")  # v0.1.1
 
 # LLM via Grok
 llm = ChatOpenAI(
@@ -26,7 +25,6 @@ llm = ChatOpenAI(
     api_key=os.getenv("XAI_API_KEY"),
 )
 
-# Kritische Signal-Kriterien
 CRITICAL_CRITERIA = """
 Bewerte ob eine der folgenden kritischen Bedingungen zutrifft:
 
@@ -60,33 +58,20 @@ def get_positions_for_market(market: str) -> list[dict]:
         ib.sleep(1)
         positions = []
         for pos in ib.positions():
-            exchange = pos.contract.exchange or "SMART"
             currency = pos.contract.currency
-
             if market == "EU" and currency == "EUR":
-                positions.append({
-                    "symbol": pos.contract.symbol,
-                    "currency": currency,
-                    "position": pos.position,
-                    "avgCost": pos.avgCost,
-                })
+                positions.append({"symbol": pos.contract.symbol, "currency": currency,
+                                   "position": pos.position, "avgCost": pos.avgCost})
             elif market == "US" and currency == "USD":
-                positions.append({
-                    "symbol": pos.contract.symbol,
-                    "currency": currency,
-                    "position": pos.position,
-                    "avgCost": pos.avgCost,
-                })
+                positions.append({"symbol": pos.contract.symbol, "currency": currency,
+                                   "position": pos.position, "avgCost": pos.avgCost})
             elif market == "ASIA" and currency in ("HKD", "JPY", "SGD", "AUD"):
-                positions.append({
-                    "symbol": pos.contract.symbol,
-                    "currency": currency,
-                    "position": pos.position,
-                    "avgCost": pos.avgCost,
-                })
+                positions.append({"symbol": pos.contract.symbol, "currency": currency,
+                                   "position": pos.position, "avgCost": pos.avgCost})
+        logger.info("Positionen geladen: %d Symbole für Markt %s", len(positions), market)
         return positions
     except Exception as e:
-        logger.error(f"Fehler beim Abrufen der Positionen: {e}")
+        logger.error("Fehler beim Abrufen der Positionen für %s: %s", market, e, exc_info=True)
         return []
 
 
@@ -98,9 +83,10 @@ def search_news(symbol: str) -> str:
             "query": f"{symbol} stock news today negative",
             "max_results": 5,
         })
+        logger.info("News gefunden für %s: %d Zeichen", symbol, len(str(results)))
         return str(results)
     except Exception as e:
-        logger.error(f"News-Suche Fehler für {symbol}: {e}")
+        logger.error("News-Suche Fehler für %s: %s", symbol, e, exc_info=True)
         return f"Keine News gefunden für {symbol}"
 
 
@@ -116,8 +102,6 @@ Aktuelle News (letzte 24h):
 """
         response = llm.invoke(prompt)
         text = response.content
-
-        # Parse Antwort
         lines = text.strip().split("\n")
         result = {
             "symbol": symbol,
@@ -135,67 +119,66 @@ Aktuelle News (letzte 24h):
                 result["zusammenfassung"] = line.split(":", 1)[1].strip()
             elif line.startswith("HANDLUNGSEMPFEHLUNG:"):
                 result["empfehlung"] = line.split(":", 1)[1].strip()
+        logger.info("Analyse %s: kritisch=%s kategorie=%s empfehlung=%s",
+                    symbol, result["kritisch"], result["kategorie"], result["empfehlung"])
         return result
     except Exception as e:
-        logger.error(f"Analyse Fehler für {symbol}: {e}")
+        logger.error("Analyse Fehler für %s: %s", symbol, e, exc_info=True)
         return {"symbol": symbol, "kritisch": False, "fehler": str(e)}
 
 
 def run_monitor(market: str):
     """Hauptfunktion: Prüft alle Positionen des jeweiligen Marktes."""
     now = datetime.now().strftime("%d.%m.%Y %H:%M")
-    logger.info(f"Portfolio Monitor gestartet: {market} um {now}")
-
-    positions = get_positions_for_market(market)
-
-    if not positions:
-        logger.info(f"Keine {market}-Positionen gefunden.")
-        return
-
-    alerts = []
-    for pos in positions:
-        symbol = pos["symbol"]
-        logger.info(f"Analysiere {symbol}...")
-        news = search_news(symbol)
-        analysis = analyze_position(symbol, news)
-
-        if analysis.get("kritisch"):
-            emoji = "🚨" if analysis["empfehlung"] == "SOFORT VERKAUFEN" else "⚠️"
-            alerts.append(
-                f"{emoji} <b>{symbol}</b>\n"
-                f"Kategorie: {analysis['kategorie']}\n"
-                f"{analysis['zusammenfassung']}\n"
-                f"→ {analysis['empfehlung']}"
+    logger.info("=== Portfolio Monitor START | market=%s | %s ===", market, now)
+    try:
+        positions = get_positions_for_market(market)
+        if not positions:
+            logger.warning("Keine %s-Positionen gefunden – Monitor-Run übersprungen", market)
+            return
+        alerts = []
+        for pos in positions:
+            symbol = pos["symbol"]
+            logger.info("Analysiere %s...", symbol)
+            try:
+                news = search_news(symbol)
+                analysis = analyze_position(symbol, news)
+                if analysis.get("kritisch"):
+                    emoji = "🚨" if analysis["empfehlung"] == "SOFORT VERKAUFEN" else "⚠️"
+                    alerts.append(
+                        f"{emoji} <b>{symbol}</b>\n"
+                        f"Kategorie: {analysis['kategorie']}\n"
+                        f"{analysis['zusammenfassung']}\n"
+                        f"→ {analysis['empfehlung']}"
+                    )
+            except Exception:
+                logger.error("Fehler bei Symbol %s", symbol, exc_info=True)
+        if alerts:
+            message = (
+                f"🔔 <b>Portfolio Alert – {market} ({now})</b>\n\n"
+                + "\n\n".join(alerts)
             )
-
-    if alerts:
-        message = (
-            f"🔔 <b>Portfolio Alert – {market} ({now})</b>\n\n"
-            + "\n\n".join(alerts)
-        )
-        send_telegram(message)
-        logger.info(f"{len(alerts)} Alert(s) gesendet.")
-    else:
-        logger.info(f"Keine kritischen Signale für {market}-Positionen.")
+            send_telegram(message)
+            logger.info("%d Alert(s) gesendet für %s", len(alerts), market)
+        else:
+            logger.info("Keine kritischen Signale für %s-Positionen", market)
+    except Exception:
+        logger.error("Monitor-Run fehlgeschlagen für %s", market, exc_info=True)
+    finally:
+        logger.info("=== Portfolio Monitor END | market=%s ===", market)
 
 
 def main():
     scheduler = BlockingScheduler(timezone="Europe/Berlin")
-
-    # EU: 08:00
-    scheduler.add_job(lambda: run_monitor("EU"), "cron", hour=8, minute=0)
-    # US: 15:00
-    scheduler.add_job(lambda: run_monitor("US"), "cron", hour=15, minute=0)
-    # ASIA: 21:00
+    scheduler.add_job(lambda: run_monitor("EU"),   "cron", hour=8,  minute=0)
+    scheduler.add_job(lambda: run_monitor("US"),   "cron", hour=15, minute=0)
     scheduler.add_job(lambda: run_monitor("ASIA"), "cron", hour=21, minute=0)
-
-    logger.info("Portfolio Monitor Scheduler gestartet.")
+    logger.info("Portfolio Monitor Scheduler gestartet")
     logger.info("Läuft täglich um 08:00 (EU), 15:00 (US), 21:00 (ASIA)")
-
     try:
         scheduler.start()
     except (KeyboardInterrupt, SystemExit):
-        logger.info("Portfolio Monitor gestoppt.")
+        logger.info("Portfolio Monitor gestoppt")
 
 
 if __name__ == "__main__":

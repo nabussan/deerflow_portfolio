@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.1] - 2026-03-23
+
+### Added
+- `backend/src/tools/logger.py` – Centralized logging (RotatingFileHandler, 5 MB / 3 backups)
+- Structured logging in `portfolio_monitor.py` – start/end, positions, signals, Telegram, tracebacks
+- Structured logging in `ibkr_connection.py` – connection events, mode, reconnects
+- Paper/Live safety guard in `ibkr_connection.py` – live mode requires `IBKR_MODE=live` + `IBKR_PORT=4001` + `IBKR_LIVE_CONFIRMED=true`
+- `scripts/restart.sh` – one-command restart with startup logging
+- `DEVGUIDE.md` – Tailscale setup, dev→prod workflow, logging reference, component map
+
+### Changed
+- `backend/.env.example` – added `IBKR_MODE` and `IBKR_LIVE_CONFIRMED` variables
+
 ## [0.1.0] - 2026-03-23
 
 ### Added
