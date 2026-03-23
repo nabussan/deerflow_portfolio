@@ -7,6 +7,20 @@ A fork of [DeerFlow 2.0](https://github.com/bytedance/deer-flow) extended with *
 
 ---
 
+## Quick Start
+```bash
+# Clone and install (WSL2/Ubuntu)
+git clone https://github.com/nabussan/deerflow_portfolio.git deer-flow
+cd deer-flow
+git checkout portfolio
+bash install.sh
+```
+
+📖 Full setup guide: [INSTALL.md](INSTALL.md)  
+📋 Changelog: [CHANGELOG.md](CHANGELOG.md)
+
+---
+
 ## What This Adds to DeerFlow
 
 | Feature | Status |
@@ -16,172 +30,140 @@ A fork of [DeerFlow 2.0](https://github.com/bytedance/deer-flow) extended with *
 | 6 trading tools (account, positions, market data, orders) | ✅ v0.1 |
 | Daily portfolio monitor (08:00 EU / 15:00 US / 21:00 Asia) | ✅ v0.1 |
 | Telegram alerts for critical news signals | ✅ v0.1 |
+| WSL2 autostart + Windows port-proxy | ✅ v0.1 |
 | Weekly position review (Bull/Bear debate) | 🔜 v0.2 |
 | Macro indicator tracker | 🔜 v0.2 |
+| Alpha Vantage integration | 🔜 v0.2 |
 | Options watchlist scanner (IVR, Put-selling candidates) | 🔜 v0.3 |
 | Risk manager + position sizing module | 🔜 v0.3 |
-| Alpha Vantage integration | 🔜 v0.2 |
 
 ---
 
 ## Architecture
-
-\`\`\`
+```
 DeerFlow 2.0 (LangGraph + LangChain)
 ├── backend/src/tools/
 │   ├── ibkr_connection.py   ← Persistent IB Gateway connection + Telegram
 │   ├── ibkr_tool.py         ← 6 LangChain tools for IBKR
 │   └── portfolio_monitor.py ← Scheduled news monitor with LLM analysis
+├── scripts/
+│   ├── wsl-startup.sh       ← WSL2 autostart script
+│   └── windows-portproxy.ps1 ← Windows port-proxy for remote access
 └── backend/src/tools/tools.py  ← IBKR tools registered in DeerFlow
-\`\`\`
-
-\`\`\`
+```
+```
 Scheduler (APScheduler)
     → Fetch positions from IBKR Gateway
     → Search news (Tavily)
     → Analyze with Grok 4.1 (xAI)
     → Telegram alert if critical signal detected
-\`\`\`
+```
+
+---
+
+## Server Setup (W541 ThinkPad)
+
+This project runs on a dedicated Windows 10 machine with WSL2:
+
+- **OS:** Windows 10 + WSL2 (Ubuntu 24.04 LTS)
+- **Broker:** IB Gateway (Paper/Live, Port 4002)
+- **Remote access:** Tailscale + RDP
+- **Runtime:** 07:00–24:00 daily
+- **UPS:** Marstek Venus E
+
+See [INSTALL.md](INSTALL.md) for full setup instructions.
 
 ---
 
 ## Prerequisites
 
-- [DeerFlow 2.0](https://github.com/bytedance/deer-flow) base installation
 - Interactive Brokers account (Paper or Live)
 - IB Gateway installed and running (Paper port: 4002)
-- Python 3.12+ via \`uv\`
-- WSL2 (Ubuntu 24) recommended for Windows users
-
----
-
-## Installation
-
-\`\`\`bash
-# 1. Clone this repo
-git clone https://github.com/nabussan/deerflow_portfolio.git
-cd deerflow_portfolio
-
-# 2. Install additional dependencies
-cd backend
-uv add ib_insync apscheduler
-
-# 3. Configure environment
-cp backend/.env.example backend/.env
-# Edit .env with your API keys
-
-# 4. Start DeerFlow
-./start.sh
-\`\`\`
+- Python 3.12+ via `uv`
+- Node.js 22+ via `nvm`
+- WSL2 (Ubuntu 24.04) on Windows
 
 ---
 
 ## Configuration
 
-Copy \`backend/.env.example\` to \`backend/.env\` and fill in:
-
-\`\`\`env
-# LLM
-XAI_API_KEY=your_grok_key
-
-# Broker
-IBKR_HOST=172.18.240.1   # Windows IP from WSL2 (ip route | grep default)
-IBKR_PORT=4002            # IB Gateway Paper: 4002, Live: 4001
-
-# News
-TAVILY_API_KEY=your_tavily_key
-
-# Alerts
-TELEGRAM_BOT_TOKEN=your_bot_token
-TELEGRAM_CHAT_ID=your_chat_id
-
-# Optional
-GOOGLE_API_KEY=your_gemini_key
-ALPHA_VANTAGE_API_KEY=your_av_key
-\`\`\`
+Copy `backend/.env.example` to `backend/.env`:
+```env
+XAI_API_KEY=           # https://console.x.ai
+TAVILY_API_KEY=        # https://tavily.com
+TELEGRAM_BOT_TOKEN=    # @BotFather on Telegram
+TELEGRAM_CHAT_ID=      # @idbot on Telegram
+IBKR_HOST=             # Windows IP from WSL2: ip route | grep default | awk '{print $3}'
+IBKR_PORT=4002         # IB Gateway Paper: 4002, Live: 4001
+```
 
 ---
 
 ## Usage
 
 ### Chat Interface
-Start DeerFlow and ask in the chat:
-\`\`\`
+Start DeerFlow and ask in chat:
+```
 "Was ist mein aktueller IBKR Kontostand?"
 "Zeige meine offenen Positionen"
 "Kaufe 10 Aktien AAPL"
-\`\`\`
+```
 
-### Portfolio Monitor (manual test)
-\`\`\`bash
+### Portfolio Monitor
+```bash
 cd backend
 uv run python3 -c "
 from src.tools.portfolio_monitor import run_monitor
-run_monitor('US')   # or 'EU' or 'ASIA'
+run_monitor('US')
 "
-\`\`\`
-
-### Portfolio Monitor (scheduled)
-\`\`\`bash
-cd backend
-uv run python3 -m src.tools.portfolio_monitor
-# Runs daily: 08:00 EU, 15:00 US, 21:00 Asia (Europe/Berlin)
-\`\`\`
+```
 
 ---
 
 ## Critical Signal Detection
 
-The portfolio monitor flags positions when it detects:
+The portfolio monitor flags positions when detecting:
 
 - **MANAGEMENT** – Negative news about CEO/CFO (resignation, scandal, insider selling)
-- **HYPE** – Irrational sentiment signals (viral X/Twitter, Reddit pump)
+- **HYPE** – Irrational sentiment (viral X/Twitter, Reddit pump)
 - **FUNDAMENTALS** – Revenue decline, shrinking gross margin, negative FCF, guidance cut
-- **SECTOR** – Regulatory changes, tariffs, commodity shocks, disruptive competitor news
+- **SECTOR** – Regulatory changes, tariffs, commodity shocks, disruptive competitor
 
 ---
 
 ## Credits & Acknowledgements
 
 ### Built on DeerFlow 2.0
-This project is a fork of [DeerFlow 2.0](https://github.com/bytedance/deer-flow) by ByteDance.
-DeerFlow provides the LangGraph-based agent harness, middleware system, frontend, and tool infrastructure that powers this project.
-We are deeply grateful to the ByteDance DeerFlow team for open-sourcing their work.
+Fork of [DeerFlow 2.0](https://github.com/bytedance/deer-flow) by ByteDance.  
+DeerFlow provides the LangGraph-based agent harness, middleware system, frontend, and tool infrastructure.
 
 ### Inspired by TradingAgents
-The multi-agent architecture concept – specialized analyst roles, Bull/Bear researcher debates, and the risk management layer (planned for v0.3) – is inspired by [TradingAgents](https://github.com/TauricResearch/TradingAgents) by TauricResearch.
-
-Specifically, we plan to adopt:
-- The **dual-model strategy** (deep-thinking models for analysis, fast models for data retrieval)
-- The **Bull/Bear debate pattern** for weekly position reviews
-- The **structured analyst roles** (News, Fundamentals, Sentiment, Technical)
-
-We do not use TradingAgents code directly. Our implementation is original, built natively on DeerFlow's tool and middleware system.
+Multi-agent architecture concept inspired by [TradingAgents](https://github.com/TauricResearch/TradingAgents) by TauricResearch.  
+We plan to adopt the Bull/Bear debate pattern and structured analyst roles in v0.2.
 
 ### Key Libraries
-- [ib_insync](https://github.com/erdewit/ib_insync) – Interactive Brokers API wrapper
+- [ib_insync](https://github.com/erdewit/ib_insync) – Interactive Brokers API
 - [LangGraph](https://github.com/langchain-ai/langgraph) – Agent orchestration
-- [LangChain](https://github.com/langchain-ai/langchain) – LLM integration
 - [APScheduler](https://github.com/agronholm/apscheduler) – Job scheduling
-- [Tavily](https://tavily.com) – AI-optimized web search
+- [Tailscale](https://tailscale.com) – Secure remote access
 
 ---
 
 ## Roadmap
 
-### v0.1 (current)
-- IBKR Gateway connection
-- 6 trading tools in DeerFlow chat
+### v0.1 (current) ✅
+- IBKR Gateway connection + 6 trading tools
 - Daily portfolio monitor with Telegram alerts
+- W541 server setup (WSL2, autostart, remote access)
 
 ### v0.2
 - Weekly position review (Bull/Bear debate)
 - Macro indicator tracker (CPI, NFP, ISM, Fed)
 - Alpha Vantage integration
-- W541 server setup guide
+- Automated port-proxy on WSL2 IP change
 
 ### v0.3
-- Options watchlist scanner (IVR, Put-selling candidates)
+- Options watchlist scanner (IVR, Put-selling)
 - Position sizing module
 - Risk manager agent
 
@@ -189,14 +171,12 @@ We do not use TradingAgents code directly. Our implementation is original, built
 
 ## Disclaimer
 
-This project is for **research and educational purposes only**.
-It is not financial advice. Trading involves significant risk of loss.
+For **research and educational purposes only**.  
+Not financial advice. Trading involves significant risk of loss.  
 Always verify agent decisions before executing real trades.
-The authors are not responsible for any financial losses.
 
 ---
 
 ## License
 
-This project inherits [DeerFlow's license](https://github.com/bytedance/deer-flow/blob/main/LICENSE).
-Our extensions are released under the same terms.
+Inherits [DeerFlow's license](https://github.com/bytedance/deer-flow/blob/main/LICENSE).
