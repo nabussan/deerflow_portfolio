@@ -15,7 +15,7 @@ from datetime import datetime
 
 import requests
 from dotenv import load_dotenv
-load_dotenv("/home/python/deer-flow/backend/.env")
+load_dotenv()
 from ib_insync import IB
 
 logger = logging.getLogger(__name__)
@@ -100,6 +100,13 @@ class IBKRConnectionManager:
 
     def get_connection(self) -> IB:
         """Gibt die aktive IB-Verbindung zurück."""
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_closed():
+                raise RuntimeError
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
         if not self.ib.isConnected():
             logger.warning("Verbindung verloren, reconnecte...")
             self._connect()
@@ -162,3 +169,18 @@ def get_ibkr_connection() -> IB:
         if _manager is None:
             _manager = IBKRConnectionManager()
     return _manager.get_connection()
+
+def run_ib(func, *args, **kwargs):
+    """Führt eine IB-Funktion im Connection-Thread aus."""
+    import concurrent.futures
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(_run_in_ib_thread, func, *args, **kwargs)
+        return future.result(timeout=30)
+
+def _run_in_ib_thread(func, *args, **kwargs):
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        return func(*args, **kwargs)
+    finally:
+        loop.close()

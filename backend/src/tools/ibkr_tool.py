@@ -1,3 +1,4 @@
+import asyncio
 """
 IBKR Tool für DeerFlow 2.0
 Nutzt persistente Verbindung via IBKRConnectionManager.
@@ -5,7 +6,7 @@ Nutzt persistente Verbindung via IBKRConnectionManager.
 
 from ib_insync import Stock, MarketOrder, LimitOrder
 from langchain_core.tools import tool
-from src.tools.ibkr_connection import get_ibkr_connection
+from src.tools.ibkr_connection import get_ibkr_connection, run_ib
 import logging
 
 logger = logging.getLogger(__name__)
@@ -30,9 +31,13 @@ def get_account_info() -> dict:
 def get_positions() -> list[dict]:
     """Gibt alle offenen Positionen im Paper Account zurück."""
     try:
+        try:
+            asyncio.get_event_loop()
+        except RuntimeError:
+            asyncio.set_event_loop(asyncio.new_event_loop())
         ib = get_ibkr_connection()
         ib.reqPositions()
-        ib.sleep(1)
+        __import__("time").sleep(1)
         return [{
             "symbol": pos.contract.symbol,
             "secType": pos.contract.secType,
@@ -53,24 +58,34 @@ def get_market_data(symbol: str, exchange: str = "SMART", currency: str = "USD")
         exchange: Börse, z.B. 'SMART', 'XETRA' (default: SMART)
         currency: Währung, z.B. 'USD', 'EUR' (default: USD)
     """
+    import threading, queue, asyncio, os
+    from ib_insync import IB as _IB, Stock as _Stock
+    result_queue = queue.Queue()
+    def _worker():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            ib = _IB()
+            ib.connect(os.getenv("IBKR_HOST","172.24.128.1"), int(os.getenv("IBKR_PORT","7496")), clientId=20, timeout=10)
+            contract = _Stock(symbol, exchange, currency)
+            ib.qualifyContracts(contract)
+            bars = ib.reqHistoricalData(contract, "", "2 D", "1 day", "TRADES", useRTH=True)
+            ib.disconnect()
+            if bars:
+                bar = bars[-1]
+                result_queue.put({"symbol":symbol,"close":bar.close,"open":bar.open,"high":bar.high,"low":bar.low,"volume":bar.volume,"date":str(bar.date)})
+            else:
+                result_queue.put({"error": f"Keine Daten für {symbol}"})
+        except Exception as e:
+            result_queue.put({"error": str(e)})
+        finally:
+            loop.close()
+    t = threading.Thread(target=_worker, daemon=True)
+    t.start()
     try:
-        ib = get_ibkr_connection()
-        contract = Stock(symbol, exchange, currency)
-        ib.qualifyContracts(contract)
-        ticker = ib.reqMktData(contract, "", False, False)
-        ib.sleep(2)
-        return {
-            "symbol": symbol,
-            "bid": ticker.bid,
-            "ask": ticker.ask,
-            "last": ticker.last,
-            "close": ticker.close,
-            "high": ticker.high,
-            "low": ticker.low,
-            "volume": ticker.volume,
-        }
-    except Exception as e:
-        return {"error": str(e)}
+        return result_queue.get(timeout=20)
+    except Exception:
+        return {"error": "Timeout"}
 
 
 @tool
@@ -104,7 +119,7 @@ def place_order(
         ib.qualifyContracts(contract)
         order = MarketOrder(action, quantity) if order_type == "MKT" else LimitOrder(action, quantity, limit_price)
         trade = ib.placeOrder(contract, order)
-        ib.sleep(1)
+        __import__("time").sleep(1)
         return {
             "orderId": trade.order.orderId,
             "symbol": symbol,
@@ -123,6 +138,8 @@ def get_open_orders() -> list[dict]:
     """Gibt alle offenen Orders zurück."""
     try:
         ib = get_ibkr_connection()
+        ib.reqAllOpenOrders()
+        __import__("time").sleep(1)
         return [{
             "orderId": t.order.orderId,
             "symbol": t.contract.symbol,
@@ -148,7 +165,7 @@ def cancel_order(order_id: int) -> dict:
         if target is None:
             return {"error": f"Order {order_id} nicht gefunden"}
         ib.cancelOrder(target.order)
-        ib.sleep(1)
+        __import__("time").sleep(1)
         return {"orderId": order_id, "status": "Storniert", "symbol": target.contract.symbol}
     except Exception as e:
         return {"error": str(e)}
