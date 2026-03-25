@@ -87,6 +87,26 @@ class DanglingToolCallMiddleware(AgentMiddleware[AgentState]):
         logger.warning(f"Injecting {patch_count} placeholder ToolMessage(s) for dangling tool calls")
         return patched
 
+    @staticmethod
+    def _fix_empty_ai_content(messages: list) -> list:
+        """Replace empty content on AIMessages that have tool_calls.
+
+        Some providers (e.g. xAI/Grok) reject AIMessages where content is an
+        empty string or empty list when tool_calls are present.  A single space
+        satisfies the "at least one content element" requirement without changing
+        the semantic meaning of the message.
+        """
+        fixed = []
+        changed = False
+        for msg in messages:
+            if getattr(msg, "type", None) == "ai" and getattr(msg, "tool_calls", None):
+                content = getattr(msg, "content", None)
+                if content is None or content == "" or content == []:
+                    msg = msg.model_copy(update={"content": " "})
+                    changed = True
+            fixed.append(msg)
+        return fixed if changed else messages
+
     @override
     def wrap_model_call(
         self,
@@ -94,8 +114,10 @@ class DanglingToolCallMiddleware(AgentMiddleware[AgentState]):
         handler: Callable[[ModelRequest], ModelResponse],
     ) -> ModelCallResult:
         patched = self._build_patched_messages(request.messages)
-        if patched is not None:
-            request = request.override(messages=patched)
+        messages = patched if patched is not None else request.messages
+        messages = self._fix_empty_ai_content(messages)
+        if messages is not request.messages:
+            request = request.override(messages=messages)
         return handler(request)
 
     @override
@@ -105,6 +127,8 @@ class DanglingToolCallMiddleware(AgentMiddleware[AgentState]):
         handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelCallResult:
         patched = self._build_patched_messages(request.messages)
-        if patched is not None:
-            request = request.override(messages=patched)
+        messages = patched if patched is not None else request.messages
+        messages = self._fix_empty_ai_content(messages)
+        if messages is not request.messages:
+            request = request.override(messages=messages)
         return await handler(request)
