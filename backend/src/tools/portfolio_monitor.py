@@ -28,23 +28,23 @@ llm = ChatOpenAI(
 CRITICAL_CRITERIA = """
 Bewerte ob eine der folgenden kritischen Bedingungen zutrifft:
 
-1. MANAGEMENT: Negative Nachrichten über CEO/CFO/Management 
+1. MANAGEMENT: Negative Nachrichten über CEO/CFO/Management
    (Rücktritt, Skandal, Betrug, Insiderverkäufe in großem Umfang)
-   
-2. HYPE/SENTIMENT: Starke Anzeichen für irrationalen Hype 
+
+2. HYPE: Starke Anzeichen für irrationalen Hype
    (viral auf X/Twitter, Reddit-Pump, extreme Kursziele von Influencern)
-   
+
 3. FUNDAMENTALS: Verschlechterung der Fundamentaldaten
-   (Umsatzrückgang, sinkende Bruttomarge, negativer FCF-Trend, 
+   (Umsatzrückgang, sinkende Bruttomarge, negativer FCF-Trend,
    Gewinnwarnung, Guidance-Senkung)
-   
-4. SEKTOR: Negative externe Einflüsse auf den Sektor
-   (neue Regulierung, Zölle, Rohstoffpreisschock, 
+
+4. SECTOR: Negative externe Einflüsse auf den Sektor
+   (neue Regulierung, Zölle, Rohstoffpreisschock,
    Konkurrent mit disruptiver Ankündigung)
 
 Antworte NUR mit:
 KRITISCH: [JA/NEIN]
-KATEGORIE: [MANAGEMENT/HYPE/FUNDAMENTALS/SEKTOR/KEINE]
+KATEGORIE: [MANAGEMENT/HYPE/FUNDAMENTALS/SECTOR/NO_SIGNAL]
 ZUSAMMENFASSUNG: [max. 2 Sätze auf Deutsch]
 HANDLUNGSEMPFEHLUNG: [SOFORT VERKAUFEN/BEOBACHTEN/KEINE AKTION]
 """
@@ -68,7 +68,7 @@ def get_positions_for_market(market: str) -> list[dict]:
             elif market == "ASIA" and currency in ("HKD", "JPY", "SGD", "AUD"):
                 positions.append({"symbol": pos.contract.symbol, "currency": currency,
                                    "position": pos.position, "avgCost": pos.avgCost})
-        logger.info("Positionen geladen: %d Symbole für Markt %s", len(positions), market)
+        logger.info("Fetched %d positions for market %s", len(positions), market)
         return positions
     except Exception as e:
         logger.error("Fehler beim Abrufen der Positionen für %s: %s", market, e, exc_info=True)
@@ -106,7 +106,7 @@ Aktuelle News (letzte 24h):
         result = {
             "symbol": symbol,
             "kritisch": False,
-            "kategorie": "KEINE",
+            "kategorie": "NO_SIGNAL",
             "zusammenfassung": "",
             "empfehlung": "KEINE AKTION",
         }
