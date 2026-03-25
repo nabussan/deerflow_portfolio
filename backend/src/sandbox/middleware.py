@@ -2,6 +2,7 @@ from typing import NotRequired, override
 
 from langchain.agents import AgentState
 from langchain.agents.middleware import AgentMiddleware
+from langgraph.config import get_config
 from langgraph.runtime import Runtime
 
 from src.agents.thread_state import SandboxState, ThreadDataState
@@ -53,7 +54,7 @@ class SandboxMiddleware(AgentMiddleware[SandboxMiddlewareState]):
 
         # Eager initialization (original behavior)
         if "sandbox" not in state or state["sandbox"] is None:
-            thread_id = runtime.context["thread_id"]
+            thread_id = get_config()["configurable"].get("thread_id")
             print(f"Thread ID: {thread_id}")
             sandbox_id = self._acquire_sandbox(thread_id)
             return {"sandbox": {"sandbox_id": sandbox_id}}

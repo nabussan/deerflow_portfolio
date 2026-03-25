@@ -5,6 +5,7 @@ from typing import Any, override
 
 from langchain.agents import AgentState
 from langchain.agents.middleware import AgentMiddleware
+from langgraph.config import get_config
 from langgraph.runtime import Runtime
 
 from src.agents.memory.queue import get_memory_queue
@@ -119,8 +120,8 @@ class MemoryMiddleware(AgentMiddleware[MemoryMiddlewareState]):
         if not config.enabled:
             return None
 
-        # Get thread ID from runtime context
-        thread_id = runtime.context.get("thread_id")
+        # Get thread ID from LangGraph config
+        thread_id = get_config()["configurable"].get("thread_id")
         if not thread_id:
             print("MemoryMiddleware: No thread_id in context, skipping memory update")
             return None
