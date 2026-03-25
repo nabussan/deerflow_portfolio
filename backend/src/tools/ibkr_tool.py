@@ -80,7 +80,11 @@ def get_market_data(symbol: str, exchange: str = "SMART", currency: str = "USD")
         ib = _require_connected()
         contract = Stock(symbol, exchange, currency)
         ibkr_submit(ib.qualifyContractsAsync(contract))
-        ticker = ib.reqMktData(contract, "", False, False)
+        # reqMktData calls Client.sendMsg → asyncio.get_event_loop() internally;
+        # must run on the dedicated ibkr-loop thread to avoid "no current event loop" error.
+        async def _req():
+            return ib.reqMktData(contract, "", False, False)
+        ticker = ibkr_submit(_req())
         _ibkr_sleep(2)
 
         def _valid(v) -> bool:
@@ -144,7 +148,10 @@ def place_order(
         contract = Stock(symbol, exchange, currency)
         ibkr_submit(ib.qualifyContractsAsync(contract))
         order = MarketOrder(action, quantity) if order_type == "MKT" else LimitOrder(action, quantity, limit_price)
-        trade = ib.placeOrder(contract, order)
+        # placeOrder calls Client.sendMsg → must run on dedicated ibkr-loop thread.
+        async def _place():
+            return ib.placeOrder(contract, order)
+        trade = ibkr_submit(_place())
         _ibkr_sleep(1)
         return {
             "orderId": trade.order.orderId,
@@ -188,7 +195,10 @@ def cancel_order(order_id: int) -> dict:
         target = next((t for t in ib.openTrades() if t.order.orderId == order_id), None)
         if target is None:
             return {"error": "Order not found"}
-        ib.cancelOrder(target.order)
+        # cancelOrder calls Client.sendMsg → must run on dedicated ibkr-loop thread.
+        async def _cancel():
+            ib.cancelOrder(target.order)
+        ibkr_submit(_cancel())
         _ibkr_sleep(1)
         return {"orderId": order_id, "status": "Storniert", "symbol": target.contract.symbol}
     except Exception as e:

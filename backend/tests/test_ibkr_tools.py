@@ -42,13 +42,30 @@ def _make_ib(connected=True):
 
 @pytest.fixture(autouse=True)
 def patch_validate():
-    """Skip _validate_trading_mode() and ibkr_submit side-effects at module load."""
+    """Skip _validate_trading_mode() and ibkr_submit side-effects at module load.
+
+    Coroutines that are thin async wrappers around synchronous ib methods (e.g.
+    _req/_place/_cancel) must be *executed* so their return value reaches the
+    caller.  Pure infrastructure coroutines (asyncio.sleep, ib mock async calls)
+    are simply closed without running to keep tests fast.
+    """
     with patch.dict("os.environ", {"IBKR_MODE": "paper", "IBKR_PORT": "4002"}):
-        def _close_coro(coro):
-            if asyncio.iscoroutine(coro):
+        def _handle_coro(coro):
+            if not asyncio.iscoroutine(coro):
+                return None
+            co_name = getattr(getattr(coro, "cr_code", None), "co_name", "") or ""
+            # Skip library sleep and ib_insync async calls (they return nothing useful)
+            if co_name in ("sleep",) or co_name.endswith("Async"):
                 coro.close()
-            return None
-        with patch("src.tools.ibkr_tool.ibkr_submit", side_effect=_close_coro):
+                return None
+            # Run wrapper coroutines (_req, _place, _cancel …) on a fresh event loop
+            loop = asyncio.new_event_loop()
+            try:
+                return loop.run_until_complete(coro)
+            finally:
+                loop.close()
+
+        with patch("src.tools.ibkr_tool.ibkr_submit", side_effect=_handle_coro):
             yield
 
 
