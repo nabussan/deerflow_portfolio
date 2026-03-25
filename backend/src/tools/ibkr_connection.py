@@ -7,7 +7,6 @@ IBKR Connection Manager
 """
 
 import asyncio
-import logging
 import os
 import threading
 import time
@@ -18,17 +17,48 @@ from dotenv import load_dotenv
 load_dotenv()
 from ib_insync import IB
 
-logger = logging.getLogger(__name__)
+# ── Logging (v0.1.1) ──────────────────────────────────────────────────────────
+from src.tools.logger import get_logger
+logger = get_logger("ibkr_connection")
 
-# Konfiguration
+# ── Konfiguration ─────────────────────────────────────────────────────────────
 IBKR_HOST = os.getenv("IBKR_HOST", "127.0.0.1")
 IBKR_PORT = int(os.getenv("IBKR_PORT", "4002"))
+IBKR_MODE = os.getenv("IBKR_MODE", "paper").lower()
 CLIENT_ID = 10
-RECONNECT_INTERVAL = 30   # Sekunden zwischen Reconnect-Versuchen
-MAX_RECONNECT_TRIES = 5   # Nach x Versuchen → Telegram-Alert
+RECONNECT_INTERVAL = 30
+MAX_RECONNECT_TRIES = 5
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
+
+# ── Paper/Live Safety Guard (v0.1.1) ──────────────────────────────────────────
+def _validate_trading_mode() -> None:
+    if IBKR_MODE == "live":
+        confirmed = os.getenv("IBKR_LIVE_CONFIRMED", "false").lower()
+        if confirmed != "true":
+            raise RuntimeError(
+                "Live trading mode requested but IBKR_LIVE_CONFIRMED is not 'true'.\n"
+                "Set IBKR_LIVE_CONFIRMED=true in backend/.env to proceed."
+            )
+        if IBKR_PORT != 4001:
+            raise RuntimeError(
+                f"IBKR_MODE=live but IBKR_PORT={IBKR_PORT} (expected 4001).\n"
+                "Fix the port mismatch before proceeding."
+            )
+        logger.warning("⚠️  LIVE TRADING MODE ACTIVE | host=%s port=%d", IBKR_HOST, IBKR_PORT)
+    elif IBKR_MODE == "paper":
+        if IBKR_PORT != 4002:
+            logger.warning(
+                "IBKR_MODE=paper but IBKR_PORT=%d (expected 4002) – proceeding anyway",
+                IBKR_PORT,
+            )
+        logger.info("Paper trading mode | host=%s port=%d", IBKR_HOST, IBKR_PORT)
+    else:
+        raise ValueError(f"Unknown IBKR_MODE='{IBKR_MODE}'. Use 'paper' or 'live'.")
+
+_validate_trading_mode()
+# ─────────────────────────────────────────────────────────────────────────────
 
 
 def send_telegram(message: str):
@@ -43,9 +73,9 @@ def send_telegram(message: str):
             "text": message,
             "parse_mode": "HTML"
         }, timeout=10)
-        logger.info(f"Telegram gesendet: {message}")
+        logger.info("Telegram gesendet: %s", message[:80])
     except Exception as e:
-        logger.error(f"Telegram Fehler: {e}")
+        logger.error("Telegram Fehler: %s", e, exc_info=True)
 
 
 class IBKRConnectionManager:
@@ -91,11 +121,11 @@ class IBKRConnectionManager:
             self.ib.connect(IBKR_HOST, IBKR_PORT, clientId=CLIENT_ID, timeout=15)
             self._connected = True
             self._reconnect_tries = 0
-            logger.info("✅ IBKR Gateway verbunden")
+            logger.info("✅ IBKR Gateway verbunden | host=%s port=%d", IBKR_HOST, IBKR_PORT)
             return True
         except Exception as e:
             self._connected = False
-            logger.error(f"❌ IBKR Verbindung fehlgeschlagen: {e}")
+            logger.error("❌ IBKR Verbindung fehlgeschlagen: %s", e, exc_info=True)
             return False
 
     def get_connection(self) -> IB:
@@ -116,9 +146,9 @@ class IBKRConnectionManager:
         """Startet den Verbindungs-Monitor in einem Background-Thread."""
         def monitor():
             while True:
-                time.sleep(60)  # Jede Minute prüfen
+                time.sleep(60)
                 if not self.ib.isConnected():
-                    logger.warning("Verbindung verloren, versuche Reconnect...")
+                    logger.warning("Verbindung verloren, versuche Reconnect... (Versuch %d)", self._reconnect_tries + 1)
                     self._reconnect_tries += 1
                     success = self._connect()
                     if success:
@@ -127,12 +157,13 @@ class IBKRConnectionManager:
                             "Verbindung wiederhergestellt."
                         )
                     elif self._reconnect_tries >= MAX_RECONNECT_TRIES:
+                        logger.error("Reconnect nach %d Versuchen fehlgeschlagen", MAX_RECONNECT_TRIES)
                         send_telegram(
                             "🚨 <b>IBKR Gateway – Manuelle Aktion nötig!</b>\n\n"
                             f"Reconnect nach {MAX_RECONNECT_TRIES} Versuchen fehlgeschlagen.\n"
                             "Bitte IB Gateway auf Windows neu starten und neu anmelden."
                         )
-                        self._reconnect_tries = 0  # Reset um nicht spam zu senden
+                        self._reconnect_tries = 0
 
         self._monitor_thread = threading.Thread(target=monitor, daemon=True)
         self._monitor_thread.start()
@@ -142,8 +173,8 @@ class IBKRConnectionManager:
         def weekly_check():
             while True:
                 now = datetime.now()
-                # Samstag = 5, 22:00 Uhr
                 if now.weekday() == 5 and now.hour == 22 and now.minute == 0:
+                    logger.info("Wöchentliche Samstag-Benachrichtigung gesendet")
                     send_telegram(
                         "⚠️ <b>IBKR Gateway – Wöchentlicher Hinweis</b>\n\n"
                         "IB Gateway wird heute Nacht (Samstag) neu gestartet.\n"
@@ -151,7 +182,7 @@ class IBKRConnectionManager:
                         "Der Auto-Reconnect versucht die Verbindung wiederherzustellen.\n\n"
                         "Falls nötig: IB Gateway auf Windows manuell neu starten."
                     )
-                time.sleep(60)  # Jede Minute prüfen
+                time.sleep(60)
 
         self._weekly_thread = threading.Thread(target=weekly_check, daemon=True)
         self._weekly_thread.start()

@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.1.1] - 2026-03-25
+
+### Security
+- Added `pip-audit` as dev dependency
+- Fixed CVE-2025-67221: `orjson` 3.11.5 → 3.11.6
+- Fixed CVE-2026-30922: `pyasn1` 0.6.2 → 0.6.3
+- Fixed CVE-2026-32597: `pyjwt` 2.10.1 → 2.12.0
+- Added `scripts/safe-add.sh`: pip-audit wrapper for `uv add`
+- Not affected by LiteLLM TeamPCP supply chain attack (2026-03-24)
+
+### Known Open CVEs
+- `pygments` 2.19.2 (CVE-2026-4539): no fix available yet, transitive dependency only
+
+
+## [0.1.1] - 2026-03-23
+
+### Added
+- `backend/src/tools/logger.py` – Centralized logging (RotatingFileHandler, 5 MB / 3 backups)
+- Structured logging in `portfolio_monitor.py` – start/end, positions, signals, Telegram, tracebacks
+- Structured logging in `ibkr_connection.py` – connection events, mode, reconnects
+- Paper/Live safety guard in `ibkr_connection.py` – live mode requires `IBKR_MODE=live` + `IBKR_PORT=4001` + `IBKR_LIVE_CONFIRMED=true`
+- `scripts/restart.sh` – one-command restart with startup logging
+- `DEVGUIDE.md` – Tailscale setup, dev→prod workflow, logging reference, component map
+
+### Changed
+- `backend/.env.example` – added `IBKR_MODE` and `IBKR_LIVE_CONFIRMED` variables
+
 ## [0.1.0] - 2026-03-23
 
 ### Added
