@@ -109,19 +109,37 @@ class IBKRConnectionManager:
         self._start_weekly_notification()
 
     def _setup_event_loop(self):
+        """Ensure a usable event loop exists for ib_insync.
+
+        When called from within a running async context (e.g. LangGraph),
+        asyncio.get_running_loop() would return the active loop. We must NOT
+        call run_until_complete() on it. Instead we give ib_insync a dedicated
+        thread-local loop so it never touches LangGraph's event loop.
+        """
         try:
-            loop = asyncio.get_event_loop()
-            if loop.is_closed():
-                asyncio.set_event_loop(asyncio.new_event_loop())
+            running = asyncio.get_running_loop()
         except RuntimeError:
-            asyncio.set_event_loop(asyncio.new_event_loop())
+            running = None
+
+        if running is not None:
+            # We're inside an async context – create a fresh loop for ib_insync
+            # and set it as the current loop for this thread only.
+            new_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(new_loop)
+        else:
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_closed():
+                    asyncio.set_event_loop(asyncio.new_event_loop())
+            except RuntimeError:
+                asyncio.set_event_loop(asyncio.new_event_loop())
 
     def _connect(self) -> bool:
         try:
             self._setup_event_loop()
             if self.ib.isConnected():
                 self.ib.disconnect()
-            self.ib.connect(IBKR_HOST, IBKR_PORT, clientId=CLIENT_ID, timeout=15)
+            self.ib.connect(IBKR_HOST, IBKR_PORT, clientId=CLIENT_ID, timeout=5)
             self._connected = True
             self._reconnect_tries = 0
             logger.info("✅ IBKR Gateway verbunden | host=%s port=%d", IBKR_HOST, IBKR_PORT)
