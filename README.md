@@ -18,6 +18,7 @@ bash install.sh
 
 📖 Full setup guide: [INSTALL.md](INSTALL.md)  
 📋 Changelog: [CHANGELOG.md](CHANGELOG.md)
+✅ Akzeptanzkriterien: [ACCEPTANCE_CRITERIA.md](ACCEPTANCE_CRITERIA.md)
 
 ---
 
