@@ -1,14 +1,21 @@
 """
 IBKR Tool für DeerFlow 2.0
 Nutzt persistente Verbindung via IBKRConnectionManager.
+Alle ib_insync-Coroutinen laufen über ibkr_submit() auf dem dedizierten Loop.
 """
 
+import asyncio
 import math
 
 from ib_insync import Stock, MarketOrder, LimitOrder
 from langchain_core.tools import tool
-from src.tools.ibkr_connection import get_ibkr_connection
+from src.tools.ibkr_connection import get_ibkr_connection, ibkr_submit
 import logging
+
+
+def _ibkr_sleep(seconds: float) -> None:
+    """Sleep on the ib_insync event loop so incoming data is processed."""
+    ibkr_submit(asyncio.sleep(seconds))
 
 logger = logging.getLogger(__name__)
 
@@ -48,8 +55,7 @@ def get_positions() -> list[dict]:
     """Gibt alle offenen Positionen im Paper Account zurück."""
     try:
         ib = _require_connected()
-        ib.reqPositions()
-        ib.sleep(1)
+        ibkr_submit(ib.reqPositionsAsync())
         return [{
             "Symbol": pos.contract.symbol,
             "secType": pos.contract.secType,
@@ -73,9 +79,9 @@ def get_market_data(symbol: str, exchange: str = "SMART", currency: str = "USD")
     try:
         ib = _require_connected()
         contract = Stock(symbol, exchange, currency)
-        ib.qualifyContracts(contract)
+        ibkr_submit(ib.qualifyContractsAsync(contract))
         ticker = ib.reqMktData(contract, "", False, False)
-        ib.sleep(2)
+        _ibkr_sleep(2)
 
         def _valid(v) -> bool:
             return v is not None and not math.isnan(v) and v > 0
@@ -136,10 +142,10 @@ def place_order(
     try:
         ib = _require_connected()
         contract = Stock(symbol, exchange, currency)
-        ib.qualifyContracts(contract)
+        ibkr_submit(ib.qualifyContractsAsync(contract))
         order = MarketOrder(action, quantity) if order_type == "MKT" else LimitOrder(action, quantity, limit_price)
         trade = ib.placeOrder(contract, order)
-        ib.sleep(1)
+        _ibkr_sleep(1)
         return {
             "orderId": trade.order.orderId,
             "symbol": symbol,
@@ -183,7 +189,7 @@ def cancel_order(order_id: int) -> dict:
         if target is None:
             return {"error": "Order not found"}
         ib.cancelOrder(target.order)
-        ib.sleep(1)
+        _ibkr_sleep(1)
         return {"orderId": order_id, "status": "Storniert", "symbol": target.contract.symbol}
     except Exception as e:
         return {"error": str(e)}

@@ -3,6 +3,7 @@ Unit-Tests für IBKR Tools (SK-02 bis SK-07).
 Alle Tests mocken die ib_insync-Verbindung – kein echtes IB Gateway nötig.
 """
 
+import asyncio
 import math
 import sys
 from types import ModuleType
@@ -41,9 +42,14 @@ def _make_ib(connected=True):
 
 @pytest.fixture(autouse=True)
 def patch_validate():
-    """Skip _validate_trading_mode() side-effects at module load."""
+    """Skip _validate_trading_mode() and ibkr_submit side-effects at module load."""
     with patch.dict("os.environ", {"IBKR_MODE": "paper", "IBKR_PORT": "4002"}):
-        yield
+        def _close_coro(coro):
+            if asyncio.iscoroutine(coro):
+                coro.close()
+            return None
+        with patch("src.tools.ibkr_tool.ibkr_submit", side_effect=_close_coro):
+            yield
 
 
 # ─────────────────────────────────────────────────────────────────────────────

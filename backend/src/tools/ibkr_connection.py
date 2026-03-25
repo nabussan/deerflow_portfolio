@@ -1,6 +1,7 @@
 """
 IBKR Connection Manager
 - Persistente Verbindung zu IB Gateway
+- Dedizierter Event-Loop-Thread für ib_insync (löst asyncio-Konflikt mit LangGraph)
 - Auto-Reconnect bei Trennung
 - Wöchentliche Telegram-Benachrichtigung (Samstag)
 - Telegram-Alert falls Reconnect scheitert
@@ -82,7 +83,13 @@ def send_telegram(message: str):
 
 
 class IBKRConnectionManager:
-    """Singleton Connection Manager für IB Gateway."""
+    """Singleton Connection Manager für IB Gateway.
+
+    Betreibt ib_insync in einem dedizierten Event-Loop-Thread, der dauerhaft
+    läuft (run_forever). Alle ib_insync-Coroutinen werden über
+    asyncio.run_coroutine_threadsafe() an diesen Loop übergeben. So gibt es
+    keinen Konflikt mit LangGraphs eigenem asyncio-Loop.
+    """
 
     _instance = None
     _lock = threading.Lock()
@@ -105,36 +112,35 @@ class IBKRConnectionManager:
         self._connect_cooldown: float = 10.0       # seconds between retries
         self._monitor_thread = None
         self._weekly_thread = None
-        self._setup_event_loop()
+
+        # Dedicated event loop – keeps running forever in its own daemon thread.
+        # ib_insync's socket reader and all async operations run on this loop.
+        self._loop = asyncio.new_event_loop()
+        self._loop_thread = threading.Thread(
+            target=self._run_loop, daemon=True, name="ibkr-loop"
+        )
+        self._loop_thread.start()
+
         self._connect()
         self._start_monitor()
         self._start_weekly_notification()
 
-    def _setup_event_loop(self):
-        """Ensure a usable event loop exists for ib_insync.
+    # ── Event loop ────────────────────────────────────────────────────────────
 
-        When called from within a running async context (e.g. LangGraph),
-        asyncio.get_running_loop() would return the active loop. We must NOT
-        call run_until_complete() on it. Instead we give ib_insync a dedicated
-        thread-local loop so it never touches LangGraph's event loop.
+    def _run_loop(self):
+        """Thread target: set and run the dedicated ib_insync event loop."""
+        asyncio.set_event_loop(self._loop)
+        self._loop.run_forever()
+
+    def submit(self, coro, timeout: float = 30.0):
+        """Submit a coroutine to the ib_insync event loop and block until done.
+
+        Safe to call from any thread (including LangGraph's async thread pool).
         """
-        try:
-            running = asyncio.get_running_loop()
-        except RuntimeError:
-            running = None
+        future = asyncio.run_coroutine_threadsafe(coro, self._loop)
+        return future.result(timeout=timeout)
 
-        if running is not None:
-            # We're inside an async context – create a fresh loop for ib_insync
-            # and set it as the current loop for this thread only.
-            new_loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(new_loop)
-        else:
-            try:
-                loop = asyncio.get_event_loop()
-                if loop.is_closed():
-                    asyncio.set_event_loop(asyncio.new_event_loop())
-            except RuntimeError:
-                asyncio.set_event_loop(asyncio.new_event_loop())
+    # ── Connect / Disconnect ──────────────────────────────────────────────────
 
     def _connect(self) -> bool:
         now = time.time()
@@ -143,10 +149,12 @@ class IBKRConnectionManager:
             return False
         self._last_connect_attempt = now
         try:
-            self._setup_event_loop()
             if self.ib.isConnected():
                 self.ib.disconnect()
-            self.ib.connect(IBKR_HOST, IBKR_PORT, clientId=CLIENT_ID, timeout=5)
+            self.submit(
+                self.ib.connectAsync(IBKR_HOST, IBKR_PORT, clientId=CLIENT_ID, timeout=10),
+                timeout=15,
+            )
             self._connected = True
             self._reconnect_tries = 0
             logger.info("✅ IBKR Gateway verbunden | host=%s port=%d", IBKR_HOST, IBKR_PORT)
@@ -166,6 +174,8 @@ class IBKRConnectionManager:
             else:
                 logger.debug("Verbindung nicht verfügbar, Cooldown aktiv")
         return self.ib
+
+    # ── Monitor ───────────────────────────────────────────────────────────────
 
     def _start_monitor(self):
         """Startet den Verbindungs-Monitor in einem Background-Thread."""
@@ -213,15 +223,27 @@ class IBKRConnectionManager:
         self._weekly_thread.start()
 
 
-# Globale Singleton-Instanz
-_manager = None
+# ── Globale Singleton-Instanz ──────────────────────────────────────────────────
+_manager: IBKRConnectionManager | None = None
 _manager_lock = threading.Lock()
 
 
-def get_ibkr_connection() -> IB:
-    """Gibt die persistente IBKR-Verbindung zurück."""
+def _get_manager() -> IBKRConnectionManager:
     global _manager
     with _manager_lock:
         if _manager is None:
             _manager = IBKRConnectionManager()
-    return _manager.get_connection()
+    return _manager
+
+
+def get_ibkr_connection() -> IB:
+    """Gibt die persistente IBKR-Verbindung zurück."""
+    return _get_manager().get_connection()
+
+
+def ibkr_submit(coro, timeout: float = 30.0):
+    """Führt eine ib_insync-Coroutine auf dem dedizierten Loop aus.
+
+    Kann sicher aus beliebigen Threads aufgerufen werden.
+    """
+    return _get_manager().submit(coro, timeout=timeout)

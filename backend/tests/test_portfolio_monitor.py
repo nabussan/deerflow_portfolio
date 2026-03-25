@@ -58,6 +58,7 @@ _mock_get_conn = MagicMock()
 _ibkr_conn_stub = ModuleType("src.tools.ibkr_connection")
 _ibkr_conn_stub.send_telegram = _mock_send_telegram
 _ibkr_conn_stub.get_ibkr_connection = _mock_get_conn
+_ibkr_conn_stub.ibkr_submit = MagicMock(return_value=None)  # needed by ibkr_tool.py
 sys.modules["src.tools.ibkr_connection"] = _ibkr_conn_stub
 
 # src.community.tavily.tools (used inside search_news at call time, not module level)
