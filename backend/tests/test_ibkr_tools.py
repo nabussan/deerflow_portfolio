@@ -15,6 +15,7 @@ import pytest
 _ib_stub = ModuleType("ib_insync")
 _ib_stub.IB = MagicMock
 _ib_stub.Stock = MagicMock
+_ib_stub.Forex = MagicMock
 _ib_stub.MarketOrder = MagicMock
 _ib_stub.LimitOrder = MagicMock
 sys.modules.setdefault("ib_insync", _ib_stub)
@@ -434,3 +435,130 @@ class TestCancelOrder:
 
         # Only t42.order was cancelled, not t99.order
         ib.cancelOrder.assert_called_once_with(t42.order)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SK-08  get_forex_rate
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestGetForexRate:
+    """get_forex_rate: Kurs, market_closed-Flag, Fehlerbehandlung."""
+
+    def _ticker(self, bid, ask, close=1.05, high=1.06, low=1.04):
+        t = MagicMock()
+        t.bid = bid
+        t.ask = ask
+        t.close = close
+        t.high = high
+        t.low = low
+        return t
+
+    def test_returns_bid_ask_mid_during_trading_hours(self):
+        """Bid/ask/mid vorhanden und korrekt berechnet."""
+        ib = _make_ib()
+        ib.reqMktData.return_value = self._ticker(bid=1.0820, ask=1.0822)
+        with patch("src.tools.ibkr_tool.get_ibkr_connection", return_value=ib):
+            from src.tools.ibkr_tool import get_forex_rate
+            result = get_forex_rate.invoke({"pair": "EURUSD"})
+
+        assert "error" not in result
+        assert result["pair"] == "EURUSD"
+        assert result["bid"] == pytest.approx(1.0820)
+        assert result["ask"] == pytest.approx(1.0822)
+        assert result["mid"] == pytest.approx(1.0821, abs=1e-5)
+
+    def test_market_closed_flag_when_no_prices(self):
+        """market_closed=True wenn bid/ask ungültig."""
+        ib = _make_ib()
+        ib.reqMktData.return_value = self._ticker(bid=float("nan"), ask=float("nan"), close=1.05)
+        with patch("src.tools.ibkr_tool.get_ibkr_connection", return_value=ib):
+            from src.tools.ibkr_tool import get_forex_rate
+            result = get_forex_rate.invoke({"pair": "EURUSD"})
+
+        assert result.get("market_closed") is True
+        assert result["bid"] is None
+        assert result["ask"] is None
+        assert result["mid"] is None
+
+    def test_error_on_exception(self):
+        """Exception → error-Key, kein Crash."""
+        ib = _make_ib()
+        ib.reqMktData.side_effect = RuntimeError("timeout")
+        with patch("src.tools.ibkr_tool.get_ibkr_connection", return_value=ib):
+            from src.tools.ibkr_tool import get_forex_rate
+            result = get_forex_rate.invoke({"pair": "EURUSD"})
+        assert "error" in result
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SK-09  place_forex_order
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestPlaceForexOrder:
+    """place_forex_order: Market/Limit-Order, Validierung."""
+
+    def _trade(self, order_id=1, status="Submitted"):
+        t = MagicMock()
+        t.order.orderId = order_id
+        t.orderStatus.status = status
+        t.orderStatus.filled = 0
+        return t
+
+    def test_market_buy_returns_order_id(self):
+        """BUY MKT → orderId > 0."""
+        ib = _make_ib()
+        ib.placeOrder.return_value = self._trade(77)
+        with patch("src.tools.ibkr_tool.get_ibkr_connection", return_value=ib):
+            from src.tools.ibkr_tool import place_forex_order
+            result = place_forex_order.invoke({"pair": "EURUSD", "action": "BUY", "quantity": 10000})
+
+        assert "error" not in result
+        assert result["orderId"] == 77
+        assert result["pair"] == "EURUSD"
+        assert result["action"] == "BUY"
+
+    def test_limit_sell_submitted(self):
+        """SELL LMT → status Submitted."""
+        ib = _make_ib()
+        ib.placeOrder.return_value = self._trade(88, "Submitted")
+        with patch("src.tools.ibkr_tool.get_ibkr_connection", return_value=ib):
+            from src.tools.ibkr_tool import place_forex_order
+            result = place_forex_order.invoke({
+                "pair": "GBPUSD", "action": "SELL",
+                "quantity": 5000, "order_type": "LMT", "limit_price": 1.2700
+            })
+
+        assert "error" not in result
+        assert result["status"] == "Submitted"
+
+    def test_invalid_action_rejected(self):
+        """Ungültige Action → Fehler, keine Order."""
+        with patch("src.tools.ibkr_tool.get_ibkr_connection") as mock_conn:
+            from src.tools.ibkr_tool import place_forex_order
+            result = place_forex_order.invoke({"pair": "EURUSD", "action": "HOLD", "quantity": 1000})
+        assert "error" in result
+        mock_conn.return_value.placeOrder.assert_not_called()
+
+    def test_zero_quantity_rejected(self):
+        """quantity=0 → Fehler."""
+        with patch("src.tools.ibkr_tool.get_ibkr_connection") as mock_conn:
+            from src.tools.ibkr_tool import place_forex_order
+            result = place_forex_order.invoke({"pair": "EURUSD", "action": "BUY", "quantity": 0})
+        assert "error" in result
+        mock_conn.return_value.placeOrder.assert_not_called()
+
+    def test_lmt_without_price_rejected(self):
+        """LMT ohne limit_price → Fehler."""
+        with patch("src.tools.ibkr_tool.get_ibkr_connection"):
+            from src.tools.ibkr_tool import place_forex_order
+            result = place_forex_order.invoke({"pair": "EURUSD", "action": "BUY", "quantity": 1000, "order_type": "LMT"})
+        assert "error" in result
+
+    def test_negative_limit_price_rejected(self):
+        """Negativer Limitkurs → Fehler."""
+        with patch("src.tools.ibkr_tool.get_ibkr_connection"):
+            from src.tools.ibkr_tool import place_forex_order
+            result = place_forex_order.invoke({
+                "pair": "EURUSD", "action": "BUY",
+                "quantity": 1000, "order_type": "LMT", "limit_price": -1.0
+            })
+        assert "error" in result

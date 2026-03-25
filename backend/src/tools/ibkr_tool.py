@@ -7,7 +7,7 @@ Alle ib_insync-Coroutinen laufen über ibkr_submit() auf dem dedizierten Loop.
 import asyncio
 import math
 
-from ib_insync import Stock, MarketOrder, LimitOrder
+from ib_insync import Forex, Stock, MarketOrder, LimitOrder
 from langchain_core.tools import tool
 from src.tools.ibkr_connection import get_ibkr_connection, ibkr_submit
 import logging
@@ -205,6 +205,92 @@ def cancel_order(order_id: int) -> dict:
         return {"error": str(e)}
 
 
+@tool
+def get_forex_rate(pair: str) -> dict:
+    """
+    Gibt den aktuellen Wechselkurs für ein Währungspaar zurück.
+    Args:
+        pair: Währungspaar, z.B. 'EURUSD', 'GBPUSD', 'USDJPY'
+    Returns:
+        bid, ask, mid-Kurs sowie close/high/low des Vortages.
+    """
+    try:
+        ib = _require_connected()
+        contract = Forex(pair)
+        async def _req():
+            return ib.reqMktData(contract, "", False, False)
+        ticker = ibkr_submit(_req())
+        _ibkr_sleep(2)
+
+        def _valid(v) -> bool:
+            return v is not None and not math.isnan(v) and v > 0
+
+        bid = ticker.bid if _valid(ticker.bid) else None
+        ask = ticker.ask if _valid(ticker.ask) else None
+        mid = round((bid + ask) / 2, 6) if bid and ask else None
+
+        result = {
+            "pair": pair,
+            "bid": bid,
+            "ask": ask,
+            "mid": mid,
+            "close": ticker.close if _valid(ticker.close) else None,
+            "high": ticker.high if _valid(ticker.high) else None,
+            "low": ticker.low if _valid(ticker.low) else None,
+        }
+        if not any([bid, ask]):
+            result["market_closed"] = True
+        return result
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@tool
+def place_forex_order(
+    pair: str,
+    action: str,
+    quantity: float,
+    order_type: str = "MKT",
+    limit_price: float = None,
+) -> dict:
+    """
+    Platziert eine Forex-Order (Währungstausch) im IBKR Paper Account.
+    Args:
+        pair: Währungspaar, z.B. 'EURUSD', 'GBPUSD'
+        action: 'BUY' (Basiswährung kaufen) oder 'SELL' (Basiswährung verkaufen)
+        quantity: Betrag in der Basiswährung, z.B. 10000 für 10.000 EUR bei EURUSD
+        order_type: 'MKT' oder 'LMT' (default: MKT)
+        limit_price: Limitkurs (nur bei LMT), z.B. 1.0850
+    """
+    if action not in ("BUY", "SELL"):
+        return {"error": "action muss 'BUY' oder 'SELL' sein"}
+    if quantity <= 0:
+        return {"error": "quantity muss größer als 0 sein"}
+    if order_type == "LMT" and limit_price is None:
+        return {"error": "limit_price erforderlich bei LMT"}
+    if limit_price is not None and limit_price <= 0:
+        return {"error": "limit_price muss größer als 0 sein"}
+    try:
+        ib = _require_connected()
+        contract = Forex(pair)
+        order = MarketOrder(action, quantity) if order_type == "MKT" else LimitOrder(action, quantity, limit_price)
+        async def _place():
+            return ib.placeOrder(contract, order)
+        trade = ibkr_submit(_place())
+        _ibkr_sleep(1)
+        return {
+            "orderId": trade.order.orderId,
+            "pair": pair,
+            "action": action,
+            "quantity": quantity,
+            "orderType": order_type,
+            "status": trade.orderStatus.status,
+            "filled": trade.orderStatus.filled,
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
 IBKR_TOOLS = [
     get_account_info,
     get_positions,
@@ -212,4 +298,6 @@ IBKR_TOOLS = [
     place_order,
     get_open_orders,
     cancel_order,
+    get_forex_rate,
+    place_forex_order,
 ]
