@@ -101,6 +101,8 @@ class IBKRConnectionManager:
         self.ib = IB()
         self._connected = False
         self._reconnect_tries = 0
+        self._last_connect_attempt: float = 0.0   # epoch seconds
+        self._connect_cooldown: float = 10.0       # seconds between retries
         self._monitor_thread = None
         self._weekly_thread = None
         self._setup_event_loop()
@@ -135,6 +137,11 @@ class IBKRConnectionManager:
                 asyncio.set_event_loop(asyncio.new_event_loop())
 
     def _connect(self) -> bool:
+        now = time.time()
+        if now - self._last_connect_attempt < self._connect_cooldown:
+            logger.debug("Connect-Cooldown aktiv, überspringe Verbindungsversuch")
+            return False
+        self._last_connect_attempt = now
         try:
             self._setup_event_loop()
             if self.ib.isConnected():
@@ -152,8 +159,12 @@ class IBKRConnectionManager:
     def get_connection(self) -> IB:
         """Gibt die aktive IB-Verbindung zurück."""
         if not self.ib.isConnected():
-            logger.warning("Verbindung verloren, reconnecte...")
-            self._connect()
+            now = time.time()
+            if now - self._last_connect_attempt >= self._connect_cooldown:
+                logger.warning("Verbindung verloren, reconnecte...")
+                self._connect()
+            else:
+                logger.debug("Verbindung nicht verfügbar, Cooldown aktiv")
         return self.ib
 
     def _start_monitor(self):
