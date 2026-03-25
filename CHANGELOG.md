@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.1.1] - 2026-03-25
+
+### Security
+- Added `pip-audit` as dev dependency
+- Fixed CVE-2025-67221: `orjson` 3.11.5 → 3.11.6
+- Fixed CVE-2026-30922: `pyasn1` 0.6.2 → 0.6.3
+- Fixed CVE-2026-32597: `pyjwt` 2.10.1 → 2.12.0
+- Added `scripts/safe-add.sh`: pip-audit wrapper for `uv add`
+- Not affected by LiteLLM TeamPCP supply chain attack (2026-03-24)
+
+### Known Open CVEs
+- `pygments` 2.19.2 (CVE-2026-4539): no fix available yet, transitive dependency only
+
+
 ## [0.1.1] - 2026-03-23
 
 ### Added
