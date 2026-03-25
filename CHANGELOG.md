@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.1.2] - 2026-03-25
+
+### Added
+- **Forex Trading**: `get_forex_rate(pair)` – Bid/Ask/Mid für beliebige Währungspaare (EURUSD, GBPUSD, USDJPY …)
+- **Forex Trading**: `place_forex_order(pair, action, quantity, order_type, limit_price)` – Market- und Limit-Orders via IBKR IDEALPRO; Menge in der Basiswährung (z.B. 10 000 EUR bei EURUSD)
+- Alle 8 IBKR-Tools in `config.yaml` unter Tool-Gruppe `ibkr` registriert
+
+### Fixed
+- **„There is no current event loop in thread"** (`RuntimeError` in Python 3.12): `ib_insync`'s `Client.sendMsg()` ruft intern `asyncio.get_event_loop()` auf, das im LangGraph-Thread-Pool wirft. Fix: `reqMktData()`, `placeOrder()` und `cancelOrder()` laufen jetzt als `async`-Wrapper über `ibkr_submit()` auf dem dedizierten `ibkr-loop`-Thread.
+- **xAI/Grok 400 „Each message must have at least one content element"**: `AIMessage` nach Tool-Call hat leeres `content`-Feld, das xAI ablehnt. Fix in `DanglingToolCallMiddleware._fix_empty_ai_content()`: leerer Content wird vor dem Model-Call durch ein Leerzeichen ersetzt.
+- **IBKR-Tools nicht erreichbar**: Tools waren implementiert, aber nicht in `config.yaml` eingetragen → Agent kannte sie nicht. Behoben durch explizite Registrierung aller 8 Tools.
+
+### Tests
+- 9 neue Unit-Tests für `get_forex_rate` und `place_forex_order` (SK-08/SK-09)
+- Test-Fixture `patch_validate` in `test_ibkr_tools.py` erweitert: Wrapper-Coroutinen (`_req`, `_place`, `_cancel`) werden auf frischem Event-Loop ausgeführt; `sleep`- und `*Async`-Coroutinen werden ohne Ausführung geschlossen
+
+
 ## [0.1.1] - 2026-03-25
 
 ### Security

@@ -1,6 +1,6 @@
 # DeerFlow Portfolio – Developer Guide
 
-> Ergänzung zu README.md für v0.1.1  
+> Ergänzung zu README.md für v0.1.2
 > Ziel: In 6 Monaten ohne Rätseln weitermachen können.
 
 ---
@@ -11,7 +11,7 @@
 
 1. Tailscale auf beiden Geräten: https://tailscale.com/download
 2. Auf beiden einloggen: `tailscale up`
-3. Tailscale-IP des W541 im Admin Panel notieren: https://login.tailscale.com/admin/machines  
+3. Tailscale-IP des W541 im Admin Panel notieren: https://login.tailscale.com/admin/machines
    Format: `100.xx.xxx.xx` – ändert sich nicht, auch nach Neustart nicht.
 
 ### Verbindung herstellen
@@ -120,8 +120,13 @@ Beim Start geprüft: Mismatch oder fehlende Confirmation → RuntimeError, kein 
 backend/src/tools/
 ├── logger.py                   ← Zentrales Logging (v0.1.1)
 ├── ibkr_connection.py          ← IB Gateway + Safety Guard (v0.1.1)
-├── ibkr_tool.py                ← 6 LangChain Tools
+├── ibkr_tool.py                ← 8 LangChain Tools (v0.1.2)
 └── portfolio_monitor.py        ← Scheduled News Monitor (v0.1.1)
+
+backend/src/agents/middlewares/
+└── dangling_tool_call_middleware.py  ← xAI-Fix: leere AIMessage-Content (v0.1.2)
+
+config.yaml                     ← Tool-Registrierung (inkl. ibkr-Gruppe, v0.1.2)
 
 scripts/
 ├── wsl-startup.sh              ← WSL2 Autostart
@@ -136,9 +141,105 @@ backend/
 
 ---
 
+## IBKR Tools – Referenz (v0.1.2)
+
+Alle Tools sind in `config.yaml` unter `group: ibkr` registriert und werden dem Agenten automatisch bereitgestellt.
+
+| Tool | Beschreibung | Beispiel-Prompt |
+|---|---|---|
+| `get_account_info` | Kontostand, Buying Power, PnL | „Zeig meinen Kontostand" |
+| `get_positions` | Alle offenen Positionen | „Was habe ich im Depot?" |
+| `get_market_data` | Kurs für Aktie/ETF | „TSLA-Kurs jetzt" |
+| `place_order` | Aktien/ETF kaufen oder verkaufen | „Kaufe 10 AAPL" |
+| `get_open_orders` | Alle offenen Orders | „Zeig meine offenen Orders" |
+| `cancel_order` | Order stornieren | „Storniere Order 42" |
+| `get_forex_rate` | Wechselkurs (Bid/Ask/Mid) | „EUR/USD aktuell?" |
+| `place_forex_order` | Währungstausch | „Kaufe 10 000 EUR gegen USD" |
+
+### Forex-Details
+
+- Exchange: `IDEALPRO` (automatisch gesetzt)
+- `quantity` = Betrag in der **Basiswährung** (linke Seite des Paares)
+  - `EURUSD` + `quantity=10000` → 10 000 EUR kaufen
+  - `GBPUSD` + `quantity=5000` + `action=SELL` → 5 000 GBP verkaufen
+- Limit-Order: `order_type="LMT"` + `limit_price=1.0850`
+- Unterstützte Paare: alle bei IBKR verfügbaren (EURUSD, GBPUSD, USDJPY, EURGBP, USDCHF, …)
+
+---
+
+## Bekannte Architektur-Fallen (Lessons Learned)
+
+### 1. ib_insync + Python 3.12 + LangGraph Thread-Pool
+
+**Symptom:** `RuntimeError: There is no current event loop in thread`
+
+**Ursache:** `ib_insync`'s `Client.sendMsg()` ruft `asyncio.get_event_loop()` auf. In Python 3.12 erzeugt das in Threads ohne eigenen Loop eine Exception (vorher wurde still ein neuer Loop erstellt).
+
+**Fix:** Alle ib_insync-Calls, die `sendMsg()` triggern (`reqMktData`, `placeOrder`, `cancelOrder`), werden als `async def`-Wrapper über `ibkr_submit()` auf dem dedizierten `ibkr-loop`-Thread ausgeführt:
+
+```python
+async def _req():
+    return ib.reqMktData(contract, "", False, False)
+ticker = ibkr_submit(_req())
+```
+
+**Faustregel:** Alles, was Daten über den Socket schickt, braucht den Loop. Reine Getter (`accountValues()`, `positions()`, `openTrades()`) greifen nur auf den lokalen Cache zu und sind sicher.
+
+---
+
+### 2. xAI/Grok: leere AIMessage-Content nach Tool-Call
+
+**Symptom:** `openai.BadRequestError: 400 – Each message must have at least one content element`
+
+**Ursache:** Nach einem Tool-Call erzeugt LangGraph eine `AIMessage` mit `tool_calls=[...]` aber `content=""`. xAI/Grok lehnt das ab (Anthropic und OpenAI akzeptieren es).
+
+**Fix:** `DanglingToolCallMiddleware._fix_empty_ai_content()` ersetzt vor jedem Model-Call leeren Content in AIMessages mit tool_calls durch `" "` (Leerzeichen).
+
+**Gilt nur für xAI.** Bei Modellwechsel zu Claude/GPT kann diese Logik stehen bleiben – sie ist harmlos.
+
+---
+
+### 3. Tools in config.yaml registrieren
+
+**Symptom:** Tool ist implementiert und getestet, aber der Agent nutzt es nie. Stattdessen macht er Web-Suche oder gibt auf.
+
+**Ursache:** Jedes Tool muss explizit in `config.yaml` unter `tools:` eingetragen sein. Ohne Eintrag weiß `get_available_tools()` nichts von seiner Existenz.
+
+**Fix:**
+```yaml
+tool_groups:
+  - name: ibkr          # ← Gruppe definieren
+
+tools:
+  - name: place_forex_order
+    group: ibkr
+    use: src.tools.ibkr_tool:place_forex_order   # ← Module:Variable
+```
+
+**Nach jeder Änderung an config.yaml:** Backend neu starten (`make stop && make dev`).
+
+---
+
+### 4. Dedizierter asyncio-Loop für ib_insync
+
+**Warum:** LangGraph hat einen eigenen asyncio-Loop im Main-Thread. ib_insync braucht seinen eigenen Loop, der dauerhaft läuft (`run_forever()`). Beide Loops dürfen sich nicht ins Gehege kommen.
+
+**Lösung:** `IBKRConnectionManager` startet beim ersten Aufruf einen Daemon-Thread `ibkr-loop`, der `asyncio.set_event_loop(self._loop)` + `self._loop.run_forever()` ausführt. Alle ib_insync-Coroutinen werden via `asyncio.run_coroutine_threadsafe(coro, self._loop)` übergeben.
+
+```
+LangGraph Main Loop          ibkr-loop Thread
+        │                          │
+        │ ibkr_submit(coro) ───────►│ run_coroutine_threadsafe
+        │ future.result() ◄─────────│ (blockiert bis fertig)
+        │                          │
+```
+
+---
+
 ## Technische Schulden (nicht vergessen)
 
 - [ ] IB Gateway Auto-Login nach Saturday-Disconnect
 - [ ] Health-check Endpoint im Backend (`/health`)
 - [ ] APScheduler-Logs in `logs/` leiten
 - [ ] `git add -p` konsequent nutzen – nie versehentlich `.env` committen
+- [ ] Forex-Positionen in `get_positions` korrekt anzeigen (secType=CASH)

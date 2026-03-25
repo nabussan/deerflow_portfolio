@@ -1,6 +1,6 @@
 # DeerFlow Portfolio – Trading Agent Extension
 
-> **Status: Prototype v0.1 – Work in Progress**  
+> **Status: Prototype v0.1.2 – Work in Progress**  
 > This is an early-stage prototype. Use at your own risk. Not financial advice.
 
 A fork of [DeerFlow 2.0](https://github.com/bytedance/deer-flow) extended with **live broker connectivity**, **automated portfolio monitoring**, and **Telegram alerts** for individual traders and investors.
@@ -16,8 +16,10 @@ git checkout portfolio
 bash install.sh
 ```
 
-📖 Full setup guide: [INSTALL.md](INSTALL.md)  
+📖 Full setup guide: [INSTALL.md](INSTALL.md)
 📋 Changelog: [CHANGELOG.md](CHANGELOG.md)
+🔧 Developer guide: [DEVGUIDE.md](DEVGUIDE.md)
+🐛 Troubleshooting: [TROUBLESHOOTING.md](TROUBLESHOOTING.md)
 
 ---
 
@@ -28,6 +30,7 @@ bash install.sh
 | IBKR Gateway connection (via `ib_insync`) | ✅ v0.1 |
 | Persistent connection manager + auto-reconnect | ✅ v0.1 |
 | 6 trading tools (account, positions, market data, orders) | ✅ v0.1 |
+| Forex rate lookup + currency exchange orders | ✅ v0.1.2 |
 | Daily portfolio monitor (08:00 EU / 15:00 US / 21:00 Asia) | ✅ v0.1 |
 | Telegram alerts for critical news signals | ✅ v0.1 |
 | WSL2 autostart + Windows port-proxy | ✅ v0.1 |
