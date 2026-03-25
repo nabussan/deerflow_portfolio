@@ -34,7 +34,10 @@ def _normalize_presented_filepath(
     if runtime.state is None:
         raise ValueError("Thread runtime state is not available")
 
-    thread_id = get_config()["configurable"].get("thread_id")
+    try:
+        thread_id = get_config()["configurable"].get("thread_id")
+    except RuntimeError:
+        thread_id = (getattr(runtime, "context", None) or {}).get("thread_id")
     if not thread_id:
         raise ValueError("Thread ID is not available in runtime context")
 

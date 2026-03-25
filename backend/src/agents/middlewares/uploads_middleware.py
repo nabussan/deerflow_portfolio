@@ -147,7 +147,10 @@ class UploadsMiddleware(AgentMiddleware[UploadsMiddlewareState]):
             return None
 
         # Resolve uploads directory for existence checks
-        thread_id = get_config()["configurable"].get("thread_id")
+        try:
+            thread_id = get_config()["configurable"].get("thread_id")
+        except RuntimeError:
+            thread_id = (getattr(runtime, "context", None) or {}).get("thread_id")
         uploads_dir = self._paths.sandbox_uploads_dir(thread_id) if thread_id else None
 
         # Get newly uploaded files from the current message's additional_kwargs.files
