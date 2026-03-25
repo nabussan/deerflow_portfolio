@@ -32,6 +32,9 @@ MAX_RECONNECT_TRIES = 5
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 
+WEEKLY_NOTIFY_HOUR = int(os.getenv("IBKR_WEEKLY_HOUR", "22"))
+WEEKLY_NOTIFY_MINUTE = int(os.getenv("IBKR_WEEKLY_MINUTE", "0"))
+
 # ── Paper/Live Safety Guard (v0.1.1) ──────────────────────────────────────────
 def _validate_trading_mode() -> None:
     if IBKR_MODE == "live":
@@ -139,7 +142,7 @@ class IBKRConnectionManager:
         """Startet den Verbindungs-Monitor in einem Background-Thread."""
         def monitor():
             while True:
-                time.sleep(60)
+                time.sleep(RECONNECT_INTERVAL)
                 if not self.ib.isConnected():
                     logger.warning("Verbindung verloren, versuche Reconnect... (Versuch %d)", self._reconnect_tries + 1)
                     self._reconnect_tries += 1
@@ -147,7 +150,7 @@ class IBKRConnectionManager:
                     if success:
                         send_telegram(
                             "✅ <b>IBKR Gateway</b>\n"
-                            "Verbindung wiederhergestellt."
+                            "Reconnected – Verbindung wiederhergestellt."
                         )
                     elif self._reconnect_tries >= MAX_RECONNECT_TRIES:
                         logger.error("Reconnect nach %d Versuchen fehlgeschlagen", MAX_RECONNECT_TRIES)
@@ -166,7 +169,7 @@ class IBKRConnectionManager:
         def weekly_check():
             while True:
                 now = datetime.now()
-                if now.weekday() == 5 and now.hour == 22 and now.minute == 0:
+                if now.weekday() == 5 and now.hour == WEEKLY_NOTIFY_HOUR and now.minute == WEEKLY_NOTIFY_MINUTE:
                     logger.info("Wöchentliche Samstag-Benachrichtigung gesendet")
                     send_telegram(
                         "⚠️ <b>IBKR Gateway – Wöchentlicher Hinweis</b>\n\n"
