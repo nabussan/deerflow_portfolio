@@ -13,11 +13,19 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def _require_connected():
+    """Returns connected IB instance or raises ConnectionError immediately."""
+    ib = get_ibkr_connection()
+    if not ib.isConnected():
+        raise ConnectionError("IBKR Gateway nicht verbunden")
+    return ib
+
+
 @tool
 def get_account_info() -> dict:
     """Gibt Kontostand, Buying Power und PnL des IBKR Paper Accounts zurück."""
     try:
-        ib = get_ibkr_connection()
+        ib = _require_connected()
         tags = ["NetLiquidation", "TotalCashValue", "BuyingPower", "UnrealizedPnL", "RealizedPnL"]
         # Collect all values grouped by tag; prefer BASE, then USD, then EUR
         raw: dict[str, dict[str, float]] = {}
@@ -39,7 +47,7 @@ def get_account_info() -> dict:
 def get_positions() -> list[dict]:
     """Gibt alle offenen Positionen im Paper Account zurück."""
     try:
-        ib = get_ibkr_connection()
+        ib = _require_connected()
         ib.reqPositions()
         ib.sleep(1)
         return [{
@@ -63,7 +71,7 @@ def get_market_data(symbol: str, exchange: str = "SMART", currency: str = "USD")
         currency: Währung, z.B. 'USD', 'EUR' (default: USD)
     """
     try:
-        ib = get_ibkr_connection()
+        ib = _require_connected()
         contract = Stock(symbol, exchange, currency)
         ib.qualifyContracts(contract)
         ticker = ib.reqMktData(contract, "", False, False)
@@ -126,7 +134,7 @@ def place_order(
     if limit_price is not None and limit_price <= 0:
         return {"error": "limit_price muss größer als 0 sein"}
     try:
-        ib = get_ibkr_connection()
+        ib = _require_connected()
         contract = Stock(symbol, exchange, currency)
         ib.qualifyContracts(contract)
         order = MarketOrder(action, quantity) if order_type == "MKT" else LimitOrder(action, quantity, limit_price)
@@ -149,7 +157,7 @@ def place_order(
 def get_open_orders() -> list[dict]:
     """Gibt alle offenen Orders zurück."""
     try:
-        ib = get_ibkr_connection()
+        ib = _require_connected()
         return [{
             "orderId": t.order.orderId,
             "symbol": t.contract.symbol,
@@ -170,7 +178,7 @@ def cancel_order(order_id: int) -> dict:
         order_id: ID der zu stornierenden Order
     """
     try:
-        ib = get_ibkr_connection()
+        ib = _require_connected()
         target = next((t for t in ib.openTrades() if t.order.orderId == order_id), None)
         if target is None:
             return {"error": "Order not found"}
