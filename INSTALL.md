@@ -135,6 +135,31 @@ New-NetFirewallRule -DisplayName "DeerFlow nginx" -Direction Inbound -Protocol T
 
 ---
 
+## Remote-Zugriff per Tailscale
+
+### Voraussetzungen
+- [Tailscale](https://tailscale.com) auf beiden Geräten installiert und mit demselben Konto angemeldet
+- RDP auf dem W541 aktiviert: *Einstellungen → System → Remotedesktop → Aktivieren*
+
+### Schritt 1: Tailscale-IP des W541 ermitteln
+Im [Tailscale Admin Panel](https://login.tailscale.com/admin/machines) oder auf dem W541:
+```bash
+tailscale ip -4
+```
+
+### Schritt 2: Tailscale-IP auf dem P53 ins Clipboard laden
+Im Tailscale-Tray-Icon auf dem P53: Rechtsklick auf W541 → *IP-Adresse kopieren*
+
+### Schritt 3: RDP-Verbindung aufbauen
+**Win + R** → `mstsc` → Enter → IP mit **Strg+V** einfügen → **Verbinden**
+
+Oder direkt:
+```
+mstsc /v:<tailscale-ip-des-w541>
+```
+
+Beim ersten Verbinden: Benutzername/Passwort des W541-Windows-Kontos eingeben, Zertifikatswarnung bestätigen.
+
 ## Bekannte Probleme
 
 | Problem | Lösung |
