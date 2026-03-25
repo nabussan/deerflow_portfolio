@@ -3,6 +3,8 @@ IBKR Tool für DeerFlow 2.0
 Nutzt persistente Verbindung via IBKRConnectionManager.
 """
 
+import math
+
 from ib_insync import Stock, MarketOrder, LimitOrder
 from langchain_core.tools import tool
 from src.tools.ibkr_connection import get_ibkr_connection
@@ -17,10 +19,17 @@ def get_account_info() -> dict:
     try:
         ib = get_ibkr_connection()
         tags = ["NetLiquidation", "TotalCashValue", "BuyingPower", "UnrealizedPnL", "RealizedPnL"]
-        result = {}
+        # Collect all values grouped by tag; prefer BASE, then USD, then EUR
+        raw: dict[str, dict[str, float]] = {}
         for av in ib.accountValues():
-            if av.tag in tags and av.currency in ("EUR", "USD", "BASE"):
-                result[f"{av.tag}_{av.currency}"] = float(av.value)
+            if av.tag in tags and av.currency in ("BASE", "USD", "EUR"):
+                raw.setdefault(av.tag, {})[av.currency] = float(av.value)
+        result = {}
+        for tag, by_currency in raw.items():
+            # Pick BASE > USD > EUR for the canonical key
+            result[tag] = by_currency.get("BASE") or by_currency.get("USD") or next(iter(by_currency.values()))
+            # Also keep per-currency breakdown
+            result.update({f"{tag}_{cur}": val for cur, val in by_currency.items()})
         return result
     except Exception as e:
         return {"error": str(e)}
@@ -34,11 +43,11 @@ def get_positions() -> list[dict]:
         ib.reqPositions()
         ib.sleep(1)
         return [{
-            "symbol": pos.contract.symbol,
+            "Symbol": pos.contract.symbol,
             "secType": pos.contract.secType,
             "currency": pos.contract.currency,
-            "position": pos.position,
-            "avgCost": round(pos.avgCost, 4),
+            "Quantity": pos.position,
+            "AvgCost": round(pos.avgCost, 4),
         } for pos in ib.positions()]
     except Exception as e:
         return [{"error": str(e)}]
@@ -59,16 +68,28 @@ def get_market_data(symbol: str, exchange: str = "SMART", currency: str = "USD")
         ib.qualifyContracts(contract)
         ticker = ib.reqMktData(contract, "", False, False)
         ib.sleep(2)
-        return {
+
+        def _valid(v) -> bool:
+            return v is not None and not math.isnan(v) and v > 0
+
+        bid = ticker.bid if _valid(ticker.bid) else None
+        ask = ticker.ask if _valid(ticker.ask) else None
+        last = ticker.last if _valid(ticker.last) else None
+        market_closed = not any([bid, ask, last])
+
+        result = {
             "symbol": symbol,
-            "bid": ticker.bid,
-            "ask": ticker.ask,
-            "last": ticker.last,
+            "bid": bid,
+            "ask": ask,
+            "last": last,
             "close": ticker.close,
             "high": ticker.high,
             "low": ticker.low,
             "volume": ticker.volume,
         }
+        if market_closed:
+            result["market_closed"] = True
+        return result
     except Exception as e:
         return {"error": str(e)}
 
@@ -96,8 +117,14 @@ def place_order(
     """
     if action not in ("BUY", "SELL"):
         return {"error": "action muss 'BUY' oder 'SELL' sein"}
+    if quantity == 0:
+        return {"error": "Quantity darf nicht 0 sein"}
+    if quantity < 0:
+        return {"error": "Quantity muss positiv sein"}
     if order_type == "LMT" and limit_price is None:
         return {"error": "limit_price erforderlich bei LMT"}
+    if limit_price is not None and limit_price <= 0:
+        return {"error": "limit_price muss größer als 0 sein"}
     try:
         ib = get_ibkr_connection()
         contract = Stock(symbol, exchange, currency)
@@ -146,7 +173,7 @@ def cancel_order(order_id: int) -> dict:
         ib = get_ibkr_connection()
         target = next((t for t in ib.openTrades() if t.order.orderId == order_id), None)
         if target is None:
-            return {"error": f"Order {order_id} nicht gefunden"}
+            return {"error": "Order not found"}
         ib.cancelOrder(target.order)
         ib.sleep(1)
         return {"orderId": order_id, "status": "Storniert", "symbol": target.contract.symbol}
