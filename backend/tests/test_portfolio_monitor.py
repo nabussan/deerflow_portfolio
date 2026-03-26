@@ -2,13 +2,14 @@
 Unit tests for portfolio_monitor.py
 Covers SK-08-04, SK-09-01…SK-09-05, SK-10-01, SK-10-03
 """
+import asyncio as _asyncio
 import sys
 import logging
 import importlib.util
 from datetime import datetime
 from pathlib import Path
 from types import ModuleType
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 # ── Stub heavy dependencies before importing portfolio_monitor ─────────────
 
@@ -58,7 +59,10 @@ _mock_get_conn = MagicMock()
 _ibkr_conn_stub = ModuleType("src.tools.ibkr_connection")
 _ibkr_conn_stub.send_telegram = _mock_send_telegram
 _ibkr_conn_stub.get_ibkr_connection = _mock_get_conn
-_ibkr_conn_stub.ibkr_submit = MagicMock(return_value=None)  # needed by ibkr_tool.py
+def _pm_ibkr_submit_impl(coro, timeout=30.0):
+    return _asyncio.run(coro)
+
+_ibkr_conn_stub.ibkr_submit = MagicMock(side_effect=_pm_ibkr_submit_impl)
 sys.modules["src.tools.ibkr_connection"] = _ibkr_conn_stub
 
 # src.community.tavily.tools (used inside search_news at call time, not module level)
@@ -76,6 +80,8 @@ _spec.loader.exec_module(pm)   # type: ignore[union-attr]
 
 def _set_llm_response(text: str):
     _FAKE_LLM_RESPONSE[0] = text
+    # Ensure pm.llm always points to our fake regardless of sys.modules load order
+    pm.llm = _FakeChatOpenAI()
 
 
 def _make_fake_position(symbol: str, currency: str = "USD", quantity: float = 100.0, avg_cost: float = 150.0):
@@ -232,6 +238,7 @@ class TestTelegramAlert:
     def _run_with_one_us_position(self, llm_response: str, symbol: str = "AAPL"):
         _set_llm_response(llm_response)
         fake_ib = MagicMock()
+        fake_ib.reqPositionsAsync = AsyncMock(return_value=None)
         fake_ib.positions.return_value = [_make_fake_position(symbol, currency="USD")]
         _mock_get_conn.return_value = fake_ib
         _mock_send_telegram.reset_mock()

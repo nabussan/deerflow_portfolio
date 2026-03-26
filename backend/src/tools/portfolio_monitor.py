@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 from apscheduler.schedulers.blocking import BlockingScheduler
 
-from src.tools.ibkr_connection import get_ibkr_connection, send_telegram
+from src.tools.ibkr_connection import get_ibkr_connection, ibkr_submit, send_telegram
 from src.tools.logger import get_logger  # v0.1.1
 
 load_dotenv(Path(__file__).parents[2] / ".env")
@@ -56,20 +56,22 @@ def get_positions_for_market(market: str) -> list[dict]:
     """Filtert Positionen nach Markt (EU/US/ASIA)."""
     try:
         ib = get_ibkr_connection()
-        ib.reqPositions()
-        ib.sleep(1)
-        positions = []
-        for pos in ib.positions():
-            currency = pos.contract.currency
-            if market == "EU" and currency == "EUR":
-                positions.append({"symbol": pos.contract.symbol, "currency": currency,
+        async def _req() -> list[dict]:
+            await ib.reqPositionsAsync()
+            result = []
+            for pos in ib.positions():
+                currency = pos.contract.currency
+                if market == "EU" and currency == "EUR":
+                    result.append({"symbol": pos.contract.symbol, "currency": currency,
                                    "position": pos.position, "avgCost": pos.avgCost})
-            elif market == "US" and currency == "USD":
-                positions.append({"symbol": pos.contract.symbol, "currency": currency,
+                elif market == "US" and currency == "USD":
+                    result.append({"symbol": pos.contract.symbol, "currency": currency,
                                    "position": pos.position, "avgCost": pos.avgCost})
-            elif market == "ASIA" and currency in ("HKD", "JPY", "SGD", "AUD"):
-                positions.append({"symbol": pos.contract.symbol, "currency": currency,
+                elif market == "ASIA" and currency in ("HKD", "JPY", "SGD", "AUD"):
+                    result.append({"symbol": pos.contract.symbol, "currency": currency,
                                    "position": pos.position, "avgCost": pos.avgCost})
+            return result
+        positions = ibkr_submit(_req())
         logger.info("Fetched %d positions for market %s", len(positions), market)
         return positions
     except Exception as e:

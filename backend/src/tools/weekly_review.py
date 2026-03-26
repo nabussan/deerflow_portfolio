@@ -93,20 +93,20 @@ def get_all_positions() -> list[dict]:
     """Holt alle offenen Positionen vom IBKR Gateway."""
     try:
         ib = get_ibkr_connection()
-        async def _req():
+        async def _req() -> list[dict]:
             await ib.reqPositionsAsync()
-        ibkr_submit(_req())
-        positions = [
-            {
-                "symbol": pos.contract.symbol,
-                "currency": pos.contract.currency,
-                "quantity": pos.position,
-                "avgCost": pos.avgCost,
-                "secType": pos.contract.secType,
-            }
-            for pos in ib.positions()
-            if pos.position != 0
-        ]
+            return [
+                {
+                    "symbol": pos.contract.symbol,
+                    "currency": pos.contract.currency,
+                    "quantity": pos.position,
+                    "avgCost": pos.avgCost,
+                    "secType": pos.contract.secType,
+                }
+                for pos in ib.positions()
+                if pos.position != 0
+            ]
+        positions = ibkr_submit(_req())
         logger.info("Fetched %d positions for weekly review", len(positions))
         return positions
     except Exception as e:

@@ -2,12 +2,13 @@
 Unit tests for weekly_review.py (v0.2)
 Acceptance Criteria: SK-11 – Weekly Bull/Bear Review
 """
+import asyncio as _asyncio
 import sys
 import logging
 import importlib.util
 from pathlib import Path
 from types import ModuleType
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 # ── Stub heavy dependencies before importing weekly_review ────────────────────
 
@@ -67,7 +68,10 @@ sys.modules["src.tools.logger"] = _logger_stub
 # src.tools.ibkr_connection
 _mock_send_telegram = MagicMock()
 _mock_get_conn = MagicMock()
-_mock_ibkr_submit = MagicMock(return_value=None)
+def _ibkr_submit_impl(coro, timeout=30.0):
+    return _asyncio.run(coro)
+
+_mock_ibkr_submit = MagicMock(side_effect=_ibkr_submit_impl)
 _ibkr_conn_stub = ModuleType("src.tools.ibkr_connection")
 _ibkr_conn_stub.send_telegram = _mock_send_telegram
 _ibkr_conn_stub.get_ibkr_connection = _mock_get_conn
@@ -101,6 +105,14 @@ def _make_fake_position(symbol: str, currency: str = "USD", quantity: float = 10
     pos.position = quantity
     pos.avgCost = avg_cost
     return pos
+
+
+def _make_fake_ib(positions: list):
+    """Erstellt einen fake IB-Mock mit awaitbarem reqPositionsAsync."""
+    fake = MagicMock()
+    fake.reqPositionsAsync = AsyncMock(return_value=None)
+    fake.positions.return_value = positions
+    return fake
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -244,9 +256,7 @@ class TestRunWeeklyReviewNoPositions:
 
     def test_no_positions_sends_info_telegram(self):
         _reset()
-        fake_ib = MagicMock()
-        fake_ib.positions.return_value = []
-        _mock_get_conn.return_value = fake_ib
+        _mock_get_conn.return_value = _make_fake_ib([])
         wr.run_weekly_review()
         assert _mock_send_telegram.called
         msg = _mock_send_telegram.call_args[0][0]
@@ -265,9 +275,7 @@ class TestRunWeeklyReviewWithPositions:
         _FAKE_BULL_RESPONSE[0] = "🐂 BULL:\n1. Arg1\n2. Arg2\n3. Arg3"
         _FAKE_BEAR_RESPONSE[0] = "🐻 BEAR:\n1. Arg1\n2. Arg2\n3. Arg3"
         _FAKE_JUDGE_RESPONSE[0] = "VERDICT: HALTEN\nBEGRÜNDUNG: OK.\nKONFIDENZ: HOCH"
-        fake_ib = MagicMock()
-        fake_ib.positions.return_value = [_make_fake_position(s) for s in symbols]
-        _mock_get_conn.return_value = fake_ib
+        _mock_get_conn.return_value = _make_fake_ib([_make_fake_position(s) for s in symbols])
         with patch.object(wr, "search_weekly_news", return_value="some weekly news"):
             wr.run_weekly_review()
 
@@ -303,12 +311,10 @@ class TestRunWeeklyReviewWithPositions:
     def test_exception_in_single_position_does_not_abort_review(self):
         """SK-11-05: Fehler bei einem Symbol bricht nicht die gesamte Review ab."""
         _reset()
-        fake_ib = MagicMock()
-        fake_ib.positions.return_value = [
+        _mock_get_conn.return_value = _make_fake_ib([
             _make_fake_position("AAPL"),
             _make_fake_position("TSLA"),
-        ]
-        _mock_get_conn.return_value = fake_ib
+        ])
 
         call_count = [0]
         def patched_news(symbol):
@@ -333,11 +339,9 @@ class TestGetAllPositions:
     """SK-11-06: Positionen mit quantity=0 werden nicht zurückgegeben."""
 
     def test_zero_quantity_positions_excluded(self):
-        fake_ib = MagicMock()
         pos_zero = _make_fake_position("CLOSED", quantity=0.0)
         pos_open = _make_fake_position("AAPL", quantity=10.0)
-        fake_ib.positions.return_value = [pos_zero, pos_open]
-        _mock_get_conn.return_value = fake_ib
+        _mock_get_conn.return_value = _make_fake_ib([pos_zero, pos_open])
         result = wr.get_all_positions()
         symbols = [p["symbol"] for p in result]
         assert "CLOSED" not in symbols
