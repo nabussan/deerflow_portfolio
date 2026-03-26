@@ -1,8 +1,24 @@
 # Migration: TWS → IB Gateway
 
+> Status: **✅ ABGESCHLOSSEN** (2026-03-26)
 > Branch: `feature/ibkr-gateway`
 > Ziel: TWS (Port 7496) durch IB Gateway (Port 4002) ersetzen
 > Hintergrund: DEVGUIDE.md § „Bekannte Architektur-Fallen", TROUBLESHOOTING.md § „IB Gateway vs. TWS"
+
+## Ergebnis
+
+Migration erfolgreich. IB Gateway läuft stabil auf Port 4002.
+
+**Eigentliche Ursache des früheren Scheiterns:**
+Nicht eine LYNX-Einschränkung, sondern eine falsch konfigurierte Trusted-IP-Liste.
+Die WSL2-Client-IP (`172.24.142.255`) war nicht eingetragen — nur die Windows-Host-IP
+(`172.24.128.1`). IB Gateway hat die Verbindung nach dem TCP-Handshake still geschlossen
+(`b''` als Antwort). Fix: WSL2-IP bzw. Subnetz `172.24.0.0/16` in Trusted IPs eintragen.
+
+**Diagnose-Methode die das aufgedeckt hat:**
+```bash
+hostname -I   # → 172.24.142.255  (WSL2-Client-IP, nicht die Windows-IP!)
+```
 
 ---
 
