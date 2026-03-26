@@ -7,6 +7,7 @@ Weekly Bull/Bear Review: Freitag 18:00 (konfigurierbar via WEEKLY_REVIEW_*)
 
 import os
 from datetime import datetime
+from pathlib import Path
 
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
@@ -15,7 +16,7 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 from src.tools.ibkr_connection import get_ibkr_connection, send_telegram
 from src.tools.logger import get_logger  # v0.1.1
 
-load_dotenv("/home/python/deer-flow/backend/.env")
+load_dotenv(Path(__file__).parents[2] / ".env")
 
 logger = get_logger("portfolio_monitor")  # v0.1.1
 
