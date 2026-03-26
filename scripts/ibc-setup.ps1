@@ -2,7 +2,7 @@
 #
 # Voraussetzungen:
 #   1. IBC ZIP von https://github.com/IbcAlpha/IBC/releases heruntergeladen und
-#      nach C:\IBC\ entpackt (IBGatewayStart.bat muss dort liegen)
+#      nach C:\IBC\ entpackt (StartGateway.bat muss dort liegen)
 #   2. IB Gateway bereits installiert unter C:\Jts\ibgateway\
 #   3. Skript als Administrator ausfuehren
 #
@@ -68,7 +68,7 @@ if (-not (Test-Path $IbcDir)) {
     }
 }
 
-$IbcScript = Join-Path $IbcDir "IBGatewayStart.bat"
+$IbcScript = Join-Path $IbcDir "StartGateway.bat"
 if (-not (Test-Path $IbcScript)) {
     Write-Host "FEHLER: $IbcScript nicht gefunden - IBC korrekt entpackt?" -ForegroundColor Red
     exit 1
