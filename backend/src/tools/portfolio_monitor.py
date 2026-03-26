@@ -20,6 +20,14 @@ load_dotenv(Path(__file__).parents[2] / ".env")
 
 logger = get_logger("portfolio_monitor")  # v0.1.1
 
+# APScheduler interne Logs (Job-Events, Fehler) → logs/portfolio_monitor.log
+import logging as _logging
+_aps_logger = _logging.getLogger("apscheduler")
+_aps_logger.setLevel(_logging.INFO)
+for _h in logger.handlers:
+    _aps_logger.addHandler(_h)
+_aps_logger.propagate = False
+
 # LLM via Grok
 llm = ChatOpenAI(
     model="grok-4-1-fast",

@@ -283,7 +283,8 @@ Bereits in `start.sh`, `scripts/restart.sh` und den systemd-Service-Units einget
 - [x] IB Gateway Auto-Login nach Saturday-Disconnect → IBC-Setup, siehe `docs/IBC_SETUP.md` + `scripts/ibc-setup.ps1`
 - [x] `restart.sh` auf neuen Stack (LangGraph + Gateway + Nginx) → erledigt v0.1.3
 - [x] systemd-Migration: alle Services als systemd-Units, `wsl-startup.sh` entfernt → erledigt v0.2
-- [ ] Health-check Endpoint im Backend (`/health`)
-- [ ] APScheduler-Logs in `logs/` leiten
-- [ ] `git add -p` konsequent nutzen – nie versehentlich `.env` committen
+- [x] Health-check Endpoint im Backend (`/health`) → erledigt, `src/gateway/app.py` Zeile 179
+- [x] APScheduler-Logs in `logs/` leiten → erledigt, APScheduler-Logger wird auf `portfolio_monitor.log` umgeleitet
+
+> **Regel:** Nie `git add .` oder `git add -A` verwenden — immer `git add -p` oder explizit nach Dateinamen. `.env` darf nie in Git landen.
 - [ ] Forex-Positionen in `get_positions` korrekt anzeigen (secType=CASH)
