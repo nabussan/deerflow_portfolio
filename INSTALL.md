@@ -102,11 +102,61 @@ IBKR_PORT=4002
 ---
 
 ## DeerFlow starten
+
+### Autostart via systemd (empfohlen, ab v0.2)
+
+DeerFlow läuft als systemd-Services und startet bei jedem WSL2-Start automatisch.
+
+#### Einmalige Einrichtung (nach Neuinstallation)
+
+**Schritt 1 – WSL2 auf systemd umstellen** (einmalig, WSL-Neustart erforderlich):
+```bash
+sudo cp ~/deer-flow/scripts/systemd/wsl.conf /etc/wsl.conf
+```
+
+**Schritt 2 – In PowerShell** (WSL neu starten):
+```powershell
+wsl --shutdown
+```
+
+**Schritt 3 – Services installieren und starten** (nach WSL-Neustart):
 ```bash
 cd ~/deer-flow
-sudo nginx -c /home/$(whoami)/deer-flow/docker/nginx/nginx.local.conf -p /usr/share/nginx/
-./start.sh
+sudo bash scripts/install-systemd.sh
+sudo systemctl start deerflow-setup deerflow-portfolio-monitor deerflow-langgraph deerflow-gateway deerflow-frontend deerflow-nginx
 ```
+
+#### Status prüfen
+```bash
+systemctl status deerflow-setup deerflow-portfolio-monitor deerflow-langgraph deerflow-gateway deerflow-frontend deerflow-nginx
+# Oder kurz:
+systemctl is-active deerflow-setup deerflow-portfolio-monitor deerflow-langgraph deerflow-gateway deerflow-frontend deerflow-nginx
+```
+
+#### Logs live verfolgen
+```bash
+journalctl -u deerflow-portfolio-monitor -f
+journalctl -u deerflow-langgraph -f
+journalctl -u deerflow-gateway -f
+```
+
+#### Services neu starten (z.B. nach Code-Änderung)
+```bash
+sudo systemctl restart deerflow-langgraph deerflow-gateway deerflow-frontend
+```
+
+#### Was welcher Service macht
+
+| Service | Aufgabe | Port |
+|---|---|---|
+| `deerflow-setup` | Setzt `IBKR_HOST` auf aktuelle WSL2-Windows-IP beim Start | – |
+| `deerflow-portfolio-monitor` | APScheduler: tägliche Portfolio-Analysen + Telegram | – |
+| `deerflow-langgraph` | LangGraph Backend (Agent-API) | 2024 |
+| `deerflow-gateway` | Gateway API (Uvicorn) | 8001 |
+| `deerflow-frontend` | Next.js Frontend | 3000 |
+| `deerflow-nginx` | nginx Reverse Proxy | 2026 |
+
+> **Hinweis:** Bei Windows-Neustart startet systemd alle Services automatisch, inklusive `deerflow-setup`, das die WSL2-IP aktualisiert. Kein manuelles Eingreifen nötig.
 
 📺 Öffne: `http://localhost:2026/workspace`
 
@@ -149,7 +199,7 @@ netsh interface portproxy delete v4tov4 listenport=3000 listenaddress=0.0.0.0
 netsh interface portproxy add v4tov4 listenport=2026 listenaddress=0.0.0.0 connectport=2026 connectaddress=$wslIP
 netsh interface portproxy add v4tov4 listenport=8001 listenaddress=0.0.0.0 connectport=8001 connectaddress=$wslIP
 
-# IBC-Port: WSL2 → IB Gateway auf Windows (wird von wsl-startup.sh benötigt)
+# IBC-Port: WSL2 → IB Gateway auf Windows
 # Achtung: listenaddress ist hier die vEthernet(WSL)-IP, NICHT 0.0.0.0
 $vethIP = (Get-NetIPAddress -InterfaceAlias 'vEthernet (WSL)' -AddressFamily IPv4).IPAddress
 netsh interface portproxy delete v4tov4 listenport=4002 listenaddress=$vethIP
@@ -213,12 +263,13 @@ Beim ersten Verbinden: Benutzername/Passwort des W541-Windows-Kontos eingeben, Z
 | `uv: command not found` | `source ~/.bashrc` |
 | Node.js zu alt | `nvm install 22 && nvm use 22` |
 | IBKR Timeout | Windows-IP prüfen: `ip route | grep default | awk '{print $3}'` |
-| LangGraph startet nicht | `fuser -k 2024/tcp && ./start.sh` |
-| nginx Port belegt | `sudo nginx -s reload` |
-| WSL2-IP nach Neustart geändert | Port-Weiterleitung neu setzen (`portproxy.ps1`) — zuerst löschen, dann neu setzen! |
+| LangGraph startet nicht | `sudo systemctl restart deerflow-langgraph` oder Port freigeben: `fuser -k 2024/tcp` |
+| nginx Port belegt | `sudo systemctl restart deerflow-nginx` |
+| WSL2-IP nach Neustart geändert | `deerflow-setup` aktualisiert die IP automatisch — Port-Weiterleitung (`portproxy.ps1`) auf Windows-Seite neu setzen |
 | App von P53/anderem Gerät nicht erreichbar | Windows-LAN-IP verwenden, nicht WSL2-IP (`172.24.x.x`) |
 | IB Gateway nicht erreichbar (Port 4002) | vEthernet(WSL)-Regel fehlt — `portproxy.ps1` erneut ausführen |
-| nvm nicht gefunden beim Autostart | `wsl-startup.sh` sourced `.bashrc` nicht — nvm explizit laden: `source $NVM_DIR/nvm.sh` |
+| Service startet nicht | `journalctl -u deerflow-<name> -n 50` für Fehlerdetails |
+| Alle Services prüfen | `systemctl is-active deerflow-setup deerflow-portfolio-monitor deerflow-langgraph deerflow-gateway deerflow-frontend deerflow-nginx` |
 
 ---
 

@@ -34,7 +34,7 @@ bash install.sh
 | Forex rate lookup + currency exchange orders | ✅ v0.1.2 |
 | Daily portfolio monitor (08:00 EU / 15:00 US / 21:00 Asia) | ✅ v0.1 |
 | Telegram alerts for critical news signals | ✅ v0.1 |
-| WSL2 autostart + Windows port-proxy | ✅ v0.1 |
+| WSL2 autostart via systemd + Windows port-proxy | ✅ v0.1 |
 | Weekly position review (Bull/Bear debate) | ✅ v0.2 |
 | Macro indicator tracker | 🔜 v0.2 |
 | Alpha Vantage integration | 🔜 v0.2 |
@@ -52,8 +52,10 @@ DeerFlow 2.0 (LangGraph + LangChain)
 │   ├── portfolio_monitor.py ← Scheduled news monitor with LLM analysis
 │   └── weekly_review.py     ← Weekly Bull/Bear debate + verdict (v0.2)
 ├── scripts/
-│   ├── wsl-startup.sh       ← WSL2 autostart script
-│   └── windows-portproxy.ps1 ← Windows port-proxy for remote access
+│   ├── systemd/             ← systemd service units (Autostart via systemd)
+│   ├── install-systemd.sh   ← Installiert alle systemd-Services einmalig
+│   ├── windows-portproxy.ps1 ← Windows port-proxy for remote access
+│   └── restart.sh           ← Manueller Neustart (Dev/Notfall)
 └── backend/src/tools/tools.py  ← IBKR tools registered in DeerFlow
 ```
 ```
@@ -159,7 +161,7 @@ We plan to adopt the Bull/Bear debate pattern and structured analyst roles in v0
 ### v0.1 (current) ✅
 - IBKR Gateway connection + 6 trading tools
 - Daily portfolio monitor with Telegram alerts
-- W541 server setup (WSL2, autostart, remote access)
+- W541 server setup (WSL2, systemd autostart, remote access)
 
 ### v0.2
 - Weekly position review (Bull/Bear debate)

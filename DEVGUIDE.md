@@ -41,7 +41,7 @@ http://100.88.180.28:3000/workspace
 | Problem | Ursache | Lösung |
 |---|---|---|
 | `tailscale ping` timeout | W541 schläft / Tailscale gestoppt | W541 aufwecken, `tailscale up` |
-| Port 3000 nicht erreichbar | WSL2-IP hat sich geändert | Task Scheduler → `wsl-portproxy` neu starten |
+| Port 3000 nicht erreichbar | WSL2-IP hat sich geändert | `portproxy.ps1` auf Windows neu ausführen; `deerflow-setup` aktualisiert die IBKR-IP automatisch |
 | IBKR nicht verbunden | IB Gateway Sa.-Nacht-Disconnect | IB Gateway manuell neu einloggen (~1 Min.) |
 
 ---
@@ -70,7 +70,7 @@ git push origin portfolio
 
 # W541: ausrollen
 git pull origin portfolio
-bash scripts/restart.sh
+sudo systemctl restart deerflow-langgraph deerflow-gateway deerflow-frontend deerflow-portfolio-monitor
 ```
 
 ---
@@ -83,7 +83,7 @@ Log-Dateien: `backend/logs/` (in `.gitignore`)
 |---|---|
 | `portfolio_monitor.log` | Monitor-Runs, Signale, Telegram-Status |
 | `ibkr_connection.log` | Verbindungsstatus, Trading-Mode, Reconnects |
-| `startup.log` | restart.sh Ausgaben |
+| `startup.log` | restart.sh Ausgaben (manueller Start) |
 | `backend.log` | Uvicorn / Backend stdout |
 | `frontend.log` | Next.js / Frontend stdout |
 
@@ -129,9 +129,17 @@ backend/src/agents/middlewares/
 config.yaml                     ← Tool-Registrierung (inkl. ibkr-Gruppe, v0.1.2)
 
 scripts/
-├── wsl-startup.sh              ← WSL2 Autostart
-├── windows-portproxy.ps1       ← Windows Port-Proxy
-└── restart.sh                  ← DeerFlow Neustart (v0.1.1)
+├── systemd/                    ← systemd Service Units (Autostart, ab v0.2)
+│   ├── deerflow-setup.service
+│   ├── deerflow-portfolio-monitor.service
+│   ├── deerflow-langgraph.service
+│   ├── deerflow-gateway.service
+│   ├── deerflow-frontend.service
+│   ├── deerflow-nginx.service
+│   └── wsl.conf                ← aktiviert systemd in WSL2
+├── install-systemd.sh          ← Installiert alle Services einmalig nach /etc/systemd/system/
+├── windows-portproxy.ps1       ← Windows Port-Proxy (läuft auf Windows-Host)
+└── restart.sh                  ← Manueller Neustart (Dev/Notfall, ohne systemd)
 
 backend/
 ├── .env                        ← Secrets (NICHT in Git)
@@ -264,7 +272,7 @@ hostname -I   # → zeigt die tatsächliche WSL2-Client-IP
 uv run langgraph dev --port 2024 --no-browser --allow-blocking --no-reload
 ```
 
-Bereits in `start.sh` und `scripts/restart.sh` eingetragen.
+Bereits in `start.sh`, `scripts/restart.sh` und den systemd-Service-Units eingetragen.
 
 **Hinweis:** `--no-reload` deaktiviert nur den Code-Hot-Reload. Nach Code-Änderungen muss `make stop && make dev` manuell ausgeführt werden.
 
@@ -274,6 +282,7 @@ Bereits in `start.sh` und `scripts/restart.sh` eingetragen.
 
 - [x] IB Gateway Auto-Login nach Saturday-Disconnect → IBC-Setup, siehe `docs/IBC_SETUP.md` + `scripts/ibc-setup.ps1`
 - [x] `restart.sh` auf neuen Stack (LangGraph + Gateway + Nginx) → erledigt v0.1.3
+- [x] systemd-Migration: alle Services als systemd-Units, `wsl-startup.sh` entfernt → erledigt v0.2
 - [ ] Health-check Endpoint im Backend (`/health`)
 - [ ] APScheduler-Logs in `logs/` leiten
 - [ ] `git add -p` konsequent nutzen – nie versehentlich `.env` committen
