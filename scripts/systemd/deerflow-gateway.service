@@ -1,0 +1,17 @@
+[Unit]
+Description=DeerFlow – Gateway API
+After=deerflow-langgraph.service
+Requires=deerflow-setup.service
+
+[Service]
+Type=simple
+User=deerflow
+WorkingDirectory=/home/deerflow/deer-flow/backend
+ExecStart=/home/deerflow/.local/bin/uv run uvicorn src.gateway.app:app --host 0.0.0.0 --port 8001
+Restart=on-failure
+RestartSec=10
+StandardOutput=append:/home/deerflow/deer-flow/logs/gateway.log
+StandardError=append:/home/deerflow/deer-flow/logs/gateway.log
+
+[Install]
+WantedBy=multi-user.target

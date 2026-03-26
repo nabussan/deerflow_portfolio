@@ -1,0 +1,16 @@
+[Unit]
+Description=DeerFlow – IBKR Host Setup (WSL2 Windows-IP)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=deerflow
+ExecStart=/bin/bash -c '\
+  WINDOWS_IP=$(ip route | grep default | awk "{print \$3}") && \
+  sed -i "s/IBKR_HOST=.*/IBKR_HOST=$WINDOWS_IP/" /home/deerflow/deer-flow/backend/.env && \
+  echo "IBKR_HOST set to $WINDOWS_IP"'
+
+[Install]
+WantedBy=multi-user.target

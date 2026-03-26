@@ -188,21 +188,14 @@ class IBKRConnectionManager:
             self._connect_lock.release()
 
     def get_connection(self) -> IB:
-        """Gibt die aktive IB-Verbindung zurück."""
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_closed():
-                raise RuntimeError
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
+        """Gibt die aktive IB-Verbindung zurück.
+
+        Löst einen einmaligen Reconnect-Versuch aus wenn die Verbindung fehlt.
+        Persistente Reconnects übernimmt der Monitor-Thread.
+        """
         if not self.ib.isConnected():
-            now = time.time()
-            if now - self._last_connect_attempt >= self._connect_cooldown:
-                logger.warning("Verbindung verloren, reconnecte...")
-                self._connect()
-            else:
-                logger.debug("Verbindung nicht verfügbar, Cooldown aktiv")
+            logger.warning("Verbindung nicht aktiv, versuche Reconnect...")
+            self._connect()
         return self.ib
 
     # ── Monitor ───────────────────────────────────────────────────────────────

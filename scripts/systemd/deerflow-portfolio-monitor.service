@@ -1,0 +1,17 @@
+[Unit]
+Description=DeerFlow – Portfolio Monitor (APScheduler)
+After=deerflow-setup.service network-online.target
+Requires=deerflow-setup.service
+
+[Service]
+Type=simple
+User=deerflow
+WorkingDirectory=/home/deerflow/deer-flow/backend
+ExecStart=/home/deerflow/.local/bin/uv run python -m src.tools.portfolio_monitor
+Restart=always
+RestartSec=30
+StandardOutput=append:/home/deerflow/deer-flow/logs/portfolio-monitor.log
+StandardError=append:/home/deerflow/deer-flow/logs/portfolio-monitor.log
+
+[Install]
+WantedBy=multi-user.target

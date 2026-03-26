@@ -1,0 +1,17 @@
+[Unit]
+Description=DeerFlow – Next.js Frontend
+After=deerflow-gateway.service
+Requires=deerflow-setup.service
+
+[Service]
+Type=simple
+User=deerflow
+WorkingDirectory=/home/deerflow/deer-flow/frontend
+ExecStart=/usr/local/bin/pnpm run dev
+Restart=on-failure
+RestartSec=10
+StandardOutput=append:/home/deerflow/deer-flow/logs/frontend.log
+StandardError=append:/home/deerflow/deer-flow/logs/frontend.log
+
+[Install]
+WantedBy=multi-user.target

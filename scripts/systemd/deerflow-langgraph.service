@@ -1,0 +1,18 @@
+[Unit]
+Description=DeerFlow – LangGraph Backend
+After=deerflow-setup.service network-online.target
+Requires=deerflow-setup.service
+
+[Service]
+Type=simple
+User=deerflow
+WorkingDirectory=/home/deerflow/deer-flow/backend
+Environment=NO_COLOR=1
+ExecStart=/home/deerflow/.local/bin/uv run langgraph dev --no-browser --allow-blocking --no-reload
+Restart=on-failure
+RestartSec=10
+StandardOutput=append:/home/deerflow/deer-flow/logs/langgraph.log
+StandardError=append:/home/deerflow/deer-flow/logs/langgraph.log
+
+[Install]
+WantedBy=multi-user.target

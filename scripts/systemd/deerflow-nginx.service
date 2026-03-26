@@ -1,0 +1,17 @@
+[Unit]
+Description=DeerFlow – Nginx Reverse Proxy
+After=deerflow-gateway.service deerflow-frontend.service
+
+[Service]
+Type=forking
+User=root
+PIDFile=/home/deerflow/deer-flow/logs/nginx.pid
+ExecStartPre=/usr/sbin/nginx -t -c /home/deerflow/deer-flow/docker/nginx/nginx.local.conf -p /home/deerflow/deer-flow/
+ExecStart=/usr/sbin/nginx -c /home/deerflow/deer-flow/docker/nginx/nginx.local.conf -p /home/deerflow/deer-flow/
+ExecReload=/usr/sbin/nginx -s reload
+ExecStop=/usr/sbin/nginx -s quit
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
