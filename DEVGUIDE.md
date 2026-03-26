@@ -236,6 +236,40 @@ LangGraph Main Loop          ibkr-loop Thread
 
 ---
 
+### 5. IB Gateway Trusted IPs – WSL2-Subnetz eintragen
+
+**Symptom:** `nc -zv <windows-ip> 4002` gelingt, aber `ib.connect()` gibt nur `b''` zurück. Kein Fehler, kein Timeout — stille Verbindung.
+
+**Ursache:** IB Gateway prüft die Trusted-IP-Liste nach dem TCP-Handshake. Die WSL2-IP (`172.24.x.x`) ist eine andere als die Windows-Host-IP (`172.24.128.1`). Nur letztere war eingetragen.
+
+**Fix:** In IB Gateway: `Configure → API → Trusted IPs` → `172.24.0.0/16` eintragen (gesamtes WSL2-Subnetz).
+
+**Diagnose:**
+```bash
+hostname -I   # → zeigt die tatsächliche WSL2-Client-IP
+```
+
+**Merke:** Die Windows-IP (Route default) ≠ die IP, die IB Gateway als Client sieht. WSL2 NAT ändert die Quell-IP nicht; IB Gateway sieht die echte WSL2-IP.
+
+---
+
+### 6. `langgraph dev` watchfiles-Absturz
+
+**Symptom:** Services laufen scheinbar, aber nach 10–30 Sekunden gibt LangGraph `2 changes detected` aus und startet neu. Laufende Chat-Requests brechen ab (502 Bad Gateway).
+
+**Ursache:** `langgraph dev` nutzt watchfiles für Hot-Reload. In der WSL2-Umgebung erkennt watchfiles auch Datei-Metadaten-Updates (z.B. durch APScheduler-Logs) als Änderungen.
+
+**Fix:** `--no-reload` Flag:
+```bash
+uv run langgraph dev --port 2024 --no-browser --allow-blocking --no-reload
+```
+
+Bereits in `start.sh` und `scripts/restart.sh` eingetragen.
+
+**Hinweis:** `--no-reload` deaktiviert nur den Code-Hot-Reload. Nach Code-Änderungen muss `make stop && make dev` manuell ausgeführt werden.
+
+---
+
 ## Technische Schulden (nicht vergessen)
 
 - [ ] IB Gateway Auto-Login nach Saturday-Disconnect

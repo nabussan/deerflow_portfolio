@@ -52,10 +52,42 @@ ConnectionError: IBKR Gateway nicht verbunden
 
 **Checkliste:**
 1. IB Gateway läuft auf Windows? → Taskleiste prüfen
-2. Port 4002 erreichbar? → `nc -zv 127.0.0.1 4002`
+2. Port 4002 erreichbar? → `nc -zv <IBKR_HOST> 4002`
 3. Saturday-Night-Disconnect? → IB Gateway manuell neu einloggen
 4. `.env` korrekt? → `IBKR_HOST`, `IBKR_PORT=4002`, `IBKR_MODE=paper`
 5. Logs prüfen: `tail -50 backend/logs/ibkr_connection.log`
+
+---
+
+### IB Gateway verbindet TCP, aber API-Handshake schlägt still fehl (`b''`)
+
+**Symptom:** `nc -zv <IBKR_HOST> 4002` → `succeeded`, aber `ib.connect()` gibt `b''` zurück. Kein Fehler, kein Timeout, keine Verbindung.
+
+**Ursache:** WSL2-Client-IP ist nicht in der Trusted-IP-Liste von IB Gateway.
+
+**Diagnose:**
+```bash
+hostname -I   # → zeigt deine echte WSL2-Client-IP (z.B. 172.24.142.255)
+```
+
+Die IP aus `ip route | grep default` (→ `172.24.128.1`) ist die **Windows-Host-IP**, aber nicht die IP, die IB Gateway als Verbindungsquelle sieht — das ist die WSL2-eigene IP aus `hostname -I`.
+
+**Fix:** In IB Gateway: `Configure → API → Trusted IPs` → `172.24.0.0/16` eintragen.
+
+---
+
+### Services stürzen alle ~10–30 Sekunden ab (502 Bad Gateway)
+
+**Symptom:** `langgraph dev` gibt `2 changes detected – reloading` aus und startet neu. Laufende Chat-Requests brechen ab.
+
+**Ursache:** watchfiles-Hot-Reload erkennt in WSL2 auch Metadaten-Änderungen (z.B. Log-Writes) als Code-Änderungen.
+
+**Fix:** `start.sh` und `scripts/restart.sh` müssen `--no-reload` verwenden:
+```bash
+uv run langgraph dev --port 2024 --no-browser --allow-blocking --no-reload
+```
+
+**Bereits in `start.sh` eingetragen** (v0.1.3). Nach `make stop && make dev` oder `./start.sh` ist der Fix aktiv.
 
 ---
 

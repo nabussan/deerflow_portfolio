@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.1.3] - 2026-03-26
+
+### Infrastructure
+- **IB Gateway Migration abgeschlossen (TWS → IB Gateway)**: Broker-Verbindung läuft jetzt auf Port 4002 (Paper). IB Gateway benötigt ~200 MB RAM statt ~1 GB (TWS) und ist headless-fähig für 24/7-Betrieb.
+- **IBGateway-Autostart Scheduled Task**: Windows Scheduled Task `IBGateway-Autostart` ersetzt `TWS-Autostart`. IB Gateway startet automatisch bei Windows-Anmeldung.
+- **`start.sh --no-reload`**: `langgraph dev` wird mit `--no-reload` gestartet. Behebt Abstürze durch watchfiles-Hot-Reload, der alle ~10 s Dateiänderungen erkannte und den Server neu startete.
+- **`wsl-startup.sh` Reihenfolge**: `IBKR_HOST`-Update erfolgt jetzt **vor** dem DeerFlow-Start — verhindert, dass beim Systemstart mit veralteter Windows-IP verbunden wird.
+
+### Root Cause Analysis: IB Gateway „silent disconnect"
+- **Symptom:** TCP-Verbindung aufgebaut, API-Handshake schlägt fehl (`b''`-Antwort).
+- **Ursache:** WSL2-Client-IP (`172.24.142.255`) war nicht in der Trusted-IP-Liste von IB Gateway eingetragen — nur die Windows-Host-IP (`172.24.128.1`). IB Gateway schließt die Verbindung nach dem TCP-Handshake still, ohne Fehlermeldung.
+- **Fix:** WSL2-Subnetz `172.24.0.0/16` in IB Gateway unter `Configure → API → Trusted IPs` eintragen.
+- **Diagnose:** `hostname -I` in WSL2 zeigt die tatsächliche Client-IP (≠ Windows-IP!).
+
+### Phase 3 – Funktionstest (alle bestanden)
+| Test | Ergebnis |
+|---|---|
+| Kontostand | ✅ NetLiquidation + BuyingPower |
+| Positionen | ✅ 3 Positionen + Forex-Cash |
+| TSLA-Kurs | ✅ bid/ask bzw. market_closed |
+| Kaufe 1 AAPL | ✅ orderId + Status Submitted |
+| EUR/USD Kurs | ✅ bid/ask/mid |
+| Kaufe 1000 EUR | ✅ orderId + Status Submitted |
+
+
 ## [0.1.2] - 2026-03-25
 
 ### Added
