@@ -171,6 +171,11 @@ def get_open_orders() -> list[dict]:
     """Gibt alle offenen Orders zurück."""
     try:
         ib = _require_connected()
+        # reqAllOpenOrders holt auch manuell in TWS platzierte Orders
+        async def _req():
+            ib.client.reqAllOpenOrders()
+        ibkr_submit(_req())
+        _ibkr_sleep(1)
         return [{
             "orderId": t.order.orderId,
             "symbol": t.contract.symbol,
