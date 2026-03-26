@@ -24,12 +24,35 @@ Write-Host ""
 Write-Host "=== IBC Setup fuer IB Gateway ===" -ForegroundColor Cyan
 Write-Host ""
 
-# Verzeichnis pruefen
+# IBC herunterladen und entpacken falls nicht vorhanden
 if (-not (Test-Path $IbcDir)) {
-    Write-Host "FEHLER: $IbcDir nicht gefunden." -ForegroundColor Red
-    Write-Host "IBC herunterladen: https://github.com/IbcAlpha/IBC/releases" -ForegroundColor Yellow
-    Write-Host "ZIP nach $IbcDir entpacken, dann Skript erneut ausfuehren." -ForegroundColor Yellow
-    exit 1
+    Write-Host "C:\IBC nicht gefunden - lade IBC automatisch herunter..." -ForegroundColor Yellow
+
+    try {
+        $ApiUrl  = "https://api.github.com/repos/IbcAlpha/IBC/releases/latest"
+        $Headers = @{ "User-Agent" = "ibc-setup-script" }
+        $Release = Invoke-RestMethod -Uri $ApiUrl -Headers $Headers
+        $Asset   = $Release.assets | Where-Object { $_.name -like "IBCWin*.zip" } | Select-Object -First 1
+
+        if (-not $Asset) {
+            Write-Host "FEHLER: Kein Windows-ZIP in aktuellem Release gefunden." -ForegroundColor Red
+            exit 1
+        }
+
+        $ZipPath = Join-Path $env:TEMP $Asset.name
+        Write-Host "Lade herunter: $($Asset.name) ($([math]::Round($Asset.size/1MB, 1)) MB)..."
+        Invoke-WebRequest -Uri $Asset.browser_download_url -OutFile $ZipPath -UseBasicParsing
+
+        Write-Host "Entpacke nach $IbcDir ..."
+        Expand-Archive -Path $ZipPath -DestinationPath $IbcDir -Force
+        Remove-Item $ZipPath
+
+        Write-Host "IBC $($Release.tag_name) installiert." -ForegroundColor Green
+    } catch {
+        Write-Host "FEHLER beim Herunterladen: $_" -ForegroundColor Red
+        Write-Host "Manuell herunterladen: https://github.com/IbcAlpha/IBC/releases" -ForegroundColor Yellow
+        exit 1
+    }
 }
 
 $IbcScript = Join-Path $IbcDir "IBGatewayStart.bat"
