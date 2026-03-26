@@ -29,6 +29,9 @@ IBKR_MODE = os.getenv("IBKR_MODE", "paper").lower()
 CLIENT_ID = 10
 RECONNECT_INTERVAL = 30
 MAX_RECONNECT_TRIES = 5
+# Backoff-Sequenz: Wartezeit in Sekunden zwischen Reconnect-Versuchen
+_BACKOFF = [30, 60, 120, 300, 600]
+ALERT_COOLDOWN = 3600  # Sekunden zwischen "Manuelle Aktion"-Alarmen
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
@@ -63,6 +66,12 @@ def _validate_trading_mode() -> None:
 
 _validate_trading_mode()
 # ─────────────────────────────────────────────────────────────────────────────
+
+
+def _is_saturday_night() -> bool:
+    """Samstag 22:00 – Sonntag 04:00: IB-Zwangsdisconnect-Fenster."""
+    now = datetime.now()
+    return (now.weekday() == 5 and now.hour >= 22) or (now.weekday() == 6 and now.hour < 4)
 
 
 def send_telegram(message: str):
@@ -110,6 +119,8 @@ class IBKRConnectionManager:
         self._reconnect_tries = 0
         self._last_connect_attempt: float = 0.0   # epoch seconds
         self._connect_cooldown: float = 10.0       # seconds between retries
+        self._last_alert_time: float = 0.0         # epoch seconds
+        self._connect_lock = threading.Lock()
         self._monitor_thread = None
         self._weekly_thread = None
 
@@ -143,26 +154,31 @@ class IBKRConnectionManager:
     # ── Connect / Disconnect ──────────────────────────────────────────────────
 
     def _connect(self) -> bool:
-        now = time.time()
-        if now - self._last_connect_attempt < self._connect_cooldown:
-            logger.debug("Connect-Cooldown aktiv, überspringe Verbindungsversuch")
+        if not self._connect_lock.acquire(blocking=False):
+            logger.debug("Connect bereits aktiv (Lock), überspringe Versuch")
             return False
-        self._last_connect_attempt = now
         try:
-            if self.ib.isConnected():
-                self.ib.disconnect()
-            self.submit(
-                self.ib.connectAsync(IBKR_HOST, IBKR_PORT, clientId=CLIENT_ID, timeout=10),
-                timeout=15,
-            )
-            self._connected = True
-            self._reconnect_tries = 0
-            logger.info("✅ IBKR Gateway verbunden | host=%s port=%d", IBKR_HOST, IBKR_PORT)
-            return True
-        except Exception as e:
-            self._connected = False
-            logger.error("❌ IBKR Verbindung fehlgeschlagen: %s", e, exc_info=True)
-            return False
+            now = time.time()
+            if now - self._last_connect_attempt < self._connect_cooldown:
+                logger.debug("Connect-Cooldown aktiv, überspringe Verbindungsversuch")
+                return False
+            self._last_connect_attempt = now
+            try:
+                if self.ib.isConnected():
+                    self.ib.disconnect()
+                self.submit(
+                    self.ib.connectAsync(IBKR_HOST, IBKR_PORT, clientId=CLIENT_ID, timeout=10),
+                    timeout=15,
+                )
+                self._connected = True
+                logger.info("✅ IBKR Gateway verbunden | host=%s port=%d", IBKR_HOST, IBKR_PORT)
+                return True
+            except Exception as e:
+                self._connected = False
+                logger.error("❌ IBKR Verbindung fehlgeschlagen: %s", e, exc_info=True)
+                return False
+        finally:
+            self._connect_lock.release()
 
     def get_connection(self) -> IB:
         """Gibt die aktive IB-Verbindung zurück."""
@@ -185,27 +201,65 @@ class IBKRConnectionManager:
     # ── Monitor ───────────────────────────────────────────────────────────────
 
     def _start_monitor(self):
-        """Startet den Verbindungs-Monitor in einem Background-Thread."""
+        """Startet den Verbindungs-Monitor in einem Background-Thread.
+
+        Reconnect-Strategie:
+        - Exponentieller Backoff: 30 → 60 → 120 → 300 → 600 s
+        - Nach Erschöpfung: stille Retries alle 10 min (kein Alarm-Dauerfeuer)
+        - Alert-Cooldown: "Manuelle Aktion"-Alarm max. 1× pro Stunde
+        - Saturday-Night-Modus (Sa 22:00 – So 04:00): angepasster Alert-Text
+        """
         def monitor():
+            sleep_time = RECONNECT_INTERVAL
             while True:
-                time.sleep(RECONNECT_INTERVAL)
+                time.sleep(sleep_time)
                 if not self.ib.isConnected():
-                    logger.warning("Verbindung verloren, versuche Reconnect... (Versuch %d)", self._reconnect_tries + 1)
                     self._reconnect_tries += 1
+                    logger.warning(
+                        "Verbindung verloren, versuche Reconnect... (Versuch %d)",
+                        self._reconnect_tries,
+                    )
                     success = self._connect()
                     if success:
+                        self._reconnect_tries = 0
+                        sleep_time = RECONNECT_INTERVAL
                         send_telegram(
                             "✅ <b>IBKR Gateway</b>\n"
                             "Reconnected – Verbindung wiederhergestellt."
                         )
-                    elif self._reconnect_tries >= MAX_RECONNECT_TRIES:
-                        logger.error("Reconnect nach %d Versuchen fehlgeschlagen", MAX_RECONNECT_TRIES)
-                        send_telegram(
-                            "🚨 <b>IBKR Gateway – Manuelle Aktion nötig!</b>\n\n"
-                            f"Reconnect nach {MAX_RECONNECT_TRIES} Versuchen fehlgeschlagen.\n"
-                            "Bitte IB Gateway auf Windows neu starten und neu anmelden."
-                        )
+                    else:
+                        # Backoff: längere Pausen nach jedem Fehlversuch
+                        idx = min(self._reconnect_tries - 1, len(_BACKOFF) - 1)
+                        sleep_time = _BACKOFF[idx]
+
+                        # Alert nur wenn Cooldown abgelaufen
+                        now = time.time()
+                        if now - self._last_alert_time >= ALERT_COOLDOWN:
+                            self._last_alert_time = now
+                            if _is_saturday_night():
+                                logger.warning("Saturday-Night-Disconnect erkannt")
+                                send_telegram(
+                                    "🌙 <b>IBKR Gateway – Samstag-Disconnect</b>\n\n"
+                                    "IB Gateway hat die Verbindung für den wöchentlichen Neustart getrennt.\n"
+                                    "Auto-Reconnect läuft – wartet auf manuellen Re-Login.\n\n"
+                                    "➡️ Bitte nach dem Gateway-Neustart neu anmelden.\n"
+                                    "Die Verbindung wird danach automatisch wiederhergestellt."
+                                )
+                            else:
+                                logger.error(
+                                    "Reconnect nach %d Versuchen fehlgeschlagen", self._reconnect_tries
+                                )
+                                send_telegram(
+                                    "🚨 <b>IBKR Gateway – Manuelle Aktion nötig!</b>\n\n"
+                                    f"Reconnect nach {self._reconnect_tries} Versuchen fehlgeschlagen.\n"
+                                    "Bitte IB Gateway auf Windows neu starten und neu anmelden."
+                                )
+                else:
+                    # Verbindung steht – Backoff zurücksetzen
+                    if self._reconnect_tries > 0:
+                        logger.info("Verbindung wiederhergestellt, Backoff zurückgesetzt")
                         self._reconnect_tries = 0
+                    sleep_time = RECONNECT_INTERVAL
 
         self._monitor_thread = threading.Thread(target=monitor, daemon=True)
         self._monitor_thread.start()
