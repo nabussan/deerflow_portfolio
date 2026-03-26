@@ -1,6 +1,6 @@
 # Acceptance Criteria – Agent Skills
 
-> **Bezug:** v0.1.0 (2026-03-23) | **Stand:** 2026-03-25  
+> **Bezug:** v0.2.0 (2026-03-26) | **Stand:** 2026-03-26  
 > Jedes Kriterium ist **binär** – entweder vollständig erfüllt oder nicht erfüllt. Teilerfüllung gilt als ✗ NICHT ERFÜLLT.  
 > Alle Tests mit Paper-Konto (Port 4002), sofern nicht anders angegeben.
 
@@ -105,4 +105,15 @@
 
 ---
 
-*Roadmap-Features (v0.2+) sind in dieser Datei noch nicht enthalten und werden mit dem jeweiligen Release ergänzt.*
+---
+
+## SK-11 · Weekly Bull/Bear Review `weekly_review.py`
+
+| ID | Akzeptanzkriterium | ✓ ERFÜLLT | ✗ NICHT ERFÜLLT |
+|---|---|---|---|
+| SK-11-01 | Bull/Bear-Debatte pro Position | `bull_bear_debate()` liefert zwei nicht-leere Strings (Bull + Bear); beide unterscheiden sich inhaltlich | Leere Strings, identische Inhalte oder unbehandelte Exception |
+| SK-11-02 | Richter-Verdict strukturiert | `judge_debate()` gibt Dict mit `verdict` ∈ {HALTEN, AUFSTOCKEN, REDUZIEREN, VERKAUFEN} und `konfidenz` ∈ {HOCH, MITTEL, NIEDRIG} zurück | Fehlende Felder, ungültiger Verdict-Wert oder Exception |
+| SK-11-03 | Telegram-Nachricht vollständig | Jede Positions-Nachricht enthält Symbol, Bull-Argumente (🐂), Bear-Argumente (🐻), Verdict-Emoji + Text, Konfidenz | Fehlende Pflichtfelder oder leere Nachricht |
+| SK-11-04 | Kein Absturz bei leeren Positionen | `run_weekly_review()` mit 0 Positionen → Telegram-Info-Nachricht; kein Crash | Unbehandelte Exception oder keine Rückmeldung |
+| SK-11-05 | Fehler bei einzelner Position bricht Review nicht ab | Exception bei einem Symbol → Review läuft für alle anderen Symbole weiter; Zusammenfassung wird gesendet | Gesamter Review abbrechend bei erstem Fehler |
+| SK-11-06 | Scheduler-Timing | Review startet freitags um 18:00 (±5 min) gemäß APScheduler-Log; konfigurierbar via `WEEKLY_REVIEW_DAY/HOUR/MINUTE` | Kein Log-Eintrag zur erwarteten Zeit oder nicht konfigurierbar |

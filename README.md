@@ -1,6 +1,6 @@
 # DeerFlow Portfolio – Trading Agent Extension
 
-> **Status: Prototype v0.1.2 – Work in Progress**  
+> **Status: Prototype v0.2.0 – Work in Progress**
 > This is an early-stage prototype. Use at your own risk. Not financial advice.
 
 A fork of [DeerFlow 2.0](https://github.com/bytedance/deer-flow) extended with **live broker connectivity**, **automated portfolio monitoring**, and **Telegram alerts** for individual traders and investors.
@@ -35,7 +35,7 @@ bash install.sh
 | Daily portfolio monitor (08:00 EU / 15:00 US / 21:00 Asia) | ✅ v0.1 |
 | Telegram alerts for critical news signals | ✅ v0.1 |
 | WSL2 autostart + Windows port-proxy | ✅ v0.1 |
-| Weekly position review (Bull/Bear debate) | 🔜 v0.2 |
+| Weekly position review (Bull/Bear debate) | ✅ v0.2 |
 | Macro indicator tracker | 🔜 v0.2 |
 | Alpha Vantage integration | 🔜 v0.2 |
 | Options watchlist scanner (IVR, Put-selling candidates) | 🔜 v0.3 |
@@ -49,7 +49,8 @@ DeerFlow 2.0 (LangGraph + LangChain)
 ├── backend/src/tools/
 │   ├── ibkr_connection.py   ← Persistent IB Gateway connection + Telegram
 │   ├── ibkr_tool.py         ← 6 LangChain tools for IBKR
-│   └── portfolio_monitor.py ← Scheduled news monitor with LLM analysis
+│   ├── portfolio_monitor.py ← Scheduled news monitor with LLM analysis
+│   └── weekly_review.py     ← Weekly Bull/Bear debate + verdict (v0.2)
 ├── scripts/
 │   ├── wsl-startup.sh       ← WSL2 autostart script
 │   └── windows-portproxy.ps1 ← Windows port-proxy for remote access

@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.2.0] - 2026-03-26
+
+### Added
+- **Weekly Bull/Bear Review** (`backend/src/tools/weekly_review.py`):
+  - Bull-Agent und Bear-Agent argumentieren getrennt für jede Position (je 3 Kernargumente via Grok)
+  - Richter-LLM gibt strukturiertes Verdict: `HALTEN / AUFSTOCKEN / REDUZIEREN / VERKAUFEN` + Konfidenz (`HOCH / MITTEL / NIEDRIG`)
+  - Telegram-Output: Header → Pro Position eine Debattenachricht → Zusammenfassung aller Verdicts
+  - Wochennews via Tavily (7 Ergebnisse pro Symbol)
+  - Konfigurierbar: `WEEKLY_REVIEW_DAY` (default: `fri`), `WEEKLY_REVIEW_HOUR` (default: `18`), `WEEKLY_REVIEW_MINUTE` (default: `0`)
+- **APScheduler-Job** in `portfolio_monitor.py`: Weekly Review automatisch freitags 18:00 Berlin
+- **22 Unit Tests** in `tests/test_weekly_review.py` (SK-11-01 bis SK-11-06)
+
+### Fixed
+- `get_all_positions()`: verwendet `await ib.reqPositionsAsync()` im ibkr-Loop-Thread (verhindert "event loop already running"-Deadlock)
+- `asyncio` import in `weekly_review.py` ergänzt
+
+### Tested
+- Live-Test mit echten Positionen (SPY, NUTX, RHM, TSLA) via TWS Paper Account bestanden
+- Verdicts: SPY 🟠 REDUZIEREN, NUTX 🔴 VERKAUFEN, RHM 🟡 HALTEN, TSLA 🟠 REDUZIEREN
+
+---
+
 ## [0.1.3] - 2026-03-26
 
 ### Infrastructure

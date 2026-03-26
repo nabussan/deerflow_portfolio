@@ -2,6 +2,7 @@
 Portfolio Monitor Agent
 Läuft täglich um 08:00, 15:00 und 21:00
 Prüft Positionen auf kritische Signale und sendet Telegram-Alerts.
+Weekly Bull/Bear Review: Freitag 18:00 (konfigurierbar via WEEKLY_REVIEW_*)
 """
 
 import os
@@ -169,12 +170,25 @@ def run_monitor(market: str):
 
 
 def main():
+    from src.tools.weekly_review import run_weekly_review, WEEKLY_REVIEW_HOUR, WEEKLY_REVIEW_MINUTE, WEEKLY_REVIEW_DAY  # noqa: PLC0415
+
     scheduler = BlockingScheduler(timezone="Europe/Berlin")
     scheduler.add_job(lambda: run_monitor("EU"),   "cron", hour=8,  minute=0)
     scheduler.add_job(lambda: run_monitor("US"),   "cron", hour=15, minute=0)
     scheduler.add_job(lambda: run_monitor("ASIA"), "cron", hour=21, minute=0)
+    scheduler.add_job(
+        run_weekly_review,
+        "cron",
+        day_of_week=WEEKLY_REVIEW_DAY,
+        hour=WEEKLY_REVIEW_HOUR,
+        minute=WEEKLY_REVIEW_MINUTE,
+    )
     logger.info("Portfolio Monitor Scheduler gestartet")
     logger.info("Läuft täglich um 08:00 (EU), 15:00 (US), 21:00 (ASIA)")
+    logger.info(
+        "Weekly Bull/Bear Review: %s um %02d:%02d",
+        WEEKLY_REVIEW_DAY.capitalize(), WEEKLY_REVIEW_HOUR, WEEKLY_REVIEW_MINUTE,
+    )
     try:
         scheduler.start()
     except (KeyboardInterrupt, SystemExit):
