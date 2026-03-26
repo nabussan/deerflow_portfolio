@@ -272,7 +272,8 @@ Bereits in `start.sh` und `scripts/restart.sh` eingetragen.
 
 ## Technische Schulden (nicht vergessen)
 
-- [ ] IB Gateway Auto-Login nach Saturday-Disconnect
+- [x] IB Gateway Auto-Login nach Saturday-Disconnect → IBC-Setup, siehe `docs/IBC_SETUP.md` + `scripts/ibc-setup.ps1`
+- [x] `restart.sh` auf neuen Stack (LangGraph + Gateway + Nginx) → erledigt v0.1.3
 - [ ] Health-check Endpoint im Backend (`/health`)
 - [ ] APScheduler-Logs in `logs/` leiten
 - [ ] `git add -p` konsequent nutzen – nie versehentlich `.env` committen
