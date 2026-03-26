@@ -2,6 +2,10 @@
 # WSL2 Autostart Script
 # Startet nginx und DeerFlow beim WSL2-Start
 
+# nvm laden (wird beim Autostart nicht automatisch durch .bashrc gesourced)
+export NVM_DIR="$HOME/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && source "$NVM_DIR/nvm.sh"
+
 # Warten bis Netzwerk bereit
 sleep 5
 
