@@ -99,6 +99,87 @@ uv run langgraph dev --port 2024 --no-browser --allow-blocking --no-reload
 
 ---
 
+### Kurs-Abfrage zeigt `market_closed: true` obwohl Markt offen ist (LYNX)
+
+**Symptom:** `get_market_data` gibt `market_closed: true` zurück, obwohl US-Markt offen (09:30–16:00 ET). `bid`, `ask` und `last` sind alle `None`.
+
+**Ursache (LYNX-spezifisch):** LYNX Paper Accounts haben standardmäßig keine Echtzeit-Marktdaten-Abonnements. Ohne Abo liefert TWS kein Streaming-bid/ask — nur verzögerte Daten (15-20 Min.) oder gar nichts. Unser Code setzt `market_closed: true` wenn alle drei Felder leer sind.
+
+**Prüfen in TWS:** `Account → Market Data Subscriptions`
+
+**Workaround:** In TWS unter `Help → Paper Trading` Delayed Market Data aktivieren. Alternativ: `get_market_data` auf `reqHistoricalData` als Fallback umstellen (liefert immer Schlusskurs, unabhängig vom Abo).
+
+---
+
+### `get_open_orders` zeigt manuell in TWS platzierte Orders nicht
+
+**Symptom:** Orders die direkt in TWS (nicht per API) platziert wurden, fehlen in der Liste.
+
+**Ursache:** `ib.openTrades()` gibt nur Orders der aktuellen API-Session zurück. `reqAllOpenOrders()` ist nötig um auch TWS-Orders abzuholen.
+
+**Fix bereits implementiert** (v0.1.4): `get_open_orders` ruft `ib.client.reqAllOpenOrders()` auf dem ibkr-Loop auf, wartet 1 Sekunde, dann `openTrades()`.
+
+Hinweis: `ib.reqAllOpenOrders()` (ib_insync-Wrapper) darf nicht direkt aufgerufen werden — verursacht `RuntimeError: This event loop is already running`. Stattdessen `ib.client.reqAllOpenOrders()` innerhalb von `ibkr_submit()` verwenden.
+
+---
+
+### Manuell in TWS platzierte Orders haben `orderId=0` – Stornierung per API nicht möglich
+
+**Symptom:** `get_open_orders` zeigt Order mit ID `TWS-<permId>`. `cancel_order` gibt Fehler zurück: *„Manuell in TWS platzierte Orders können nicht per API storniert werden"*. TWS-Fehlermeldung: `Error 10147: OrderId 0 that needs to be cancelled is not found`.
+
+**Ursache:** IBKR vergibt keine API-`orderId` für Orders die direkt in TWS platziert wurden. Die API kennt sie nur via `permId`, aber `cancelOrder()` braucht eine gültige `orderId`.
+
+**Workaround:** Solche Orders direkt in TWS stornieren. Die `permId` (z.B. `TWS-171251651`) dient nur zur Identifikation im DeerFlow-UI.
+
+---
+
+### IBC startet IB Gateway nicht nach Windows-Neustart (LYNX / IBC-Konfiguration)
+
+**Symptom:** Scheduled Task `IBGateway-Autostart` zeigt Status `Bereit`, aber kein Gateway-Prozess läuft. IBC-Log: `Error while: Running StartIBC.bat / ERRORLEVEL = 1004`.
+
+**Ursache 1:** `TWS_MAJOR_VRSN` in `C:\IBC\StartGateway.bat` ist auf alte Version hardcoded (z.B. `1019`), installierte Version ist `1037`.
+
+**Fix:**
+```powershell
+(Get-Content "C:\IBC\StartGateway.bat") -replace 'set TWS_MAJOR_VRSN=1019', 'set TWS_MAJOR_VRSN=1037' | Set-Content "C:\IBC\StartGateway.bat"
+```
+
+**Ursache 2:** `CONFIG`-Pfad in `StartGateway.bat` zeigt auf `%USERPROFILE%\Documents\IBC\config.ini`, aber config liegt in `C:\IBC\config.ini`.
+
+**Fix:**
+```powershell
+(Get-Content "C:\IBC\StartGateway.bat") -replace 'set CONFIG=%USERPROFILE%\\Documents\\IBC\\config.ini', 'set CONFIG=C:\IBC\config.ini' | Set-Content "C:\IBC\StartGateway.bat"
+```
+
+Nach beiden Fixes manuell testen:
+```powershell
+cmd /c "C:\IBC\StartGateway.bat" 1037 "C:\IBC\config.ini" "C:\IBC" Gateway
+```
+
+---
+
+### LYNX IB Gateway akzeptiert keinen API-Handshake — dauerhafter Timeout
+
+**Symptom:** `nc -zv <IBKR_HOST> 4002` → `succeeded`, aber `ib.connect()` gibt dauerhaft `TimeoutError`. Kein `b''`, kein Fehler — einfach Timeout nach 10 Sekunden. In IB Gateway fehlt die Option „Socket Clients aktivieren".
+
+**Ursache (LYNX-spezifisch):** LYNX Broker Gateway (White-Label IBKR) hat im API-Settings-Dialog keine „Enable Socket Clients"-Option und blockiert den ib_insync-Handshake zuverlässig. Ursache seitens LYNX unklar — möglicherweise policy-bedingte Einschränkung.
+
+**Workaround: TWS statt IB Gateway verwenden.**
+
+```bash
+# In backend/.env:
+IBKR_PORT=7496   # TWS statt IB Gateway (4002)
+```
+
+TWS starten: `C:\Jts\tws.exe` → einloggen → API-Settings:
+- Socket Port: `7496`
+- Read-Only API: deaktiviert
+- „Nur lokale Verbindungen": deaktiviert
+
+IBC kann alternativ auf `StartTWS.bat` umgestellt werden statt `StartGateway.bat`.
+
+---
+
 ## xAI / Grok
 
 ### 400 „Each message must have at least one content element"

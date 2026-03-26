@@ -202,12 +202,13 @@ def get_open_orders() -> list[dict]:
         ibkr_submit(_req())
         _ibkr_sleep(1)
         return [{
-            "orderId": t.order.orderId,
+            "orderId": t.order.orderId if t.order.orderId != 0 else f"TWS-{t.orderStatus.permId}",
             "symbol": t.contract.symbol,
             "action": t.order.action,
             "quantity": t.order.totalQuantity,
             "orderType": t.order.orderType,
             "status": t.orderStatus.status,
+            **({"note": "Manuell in TWS platziert – Stornierung nur in TWS möglich"} if t.order.orderId == 0 else {}),
         } for t in ib.openTrades()]
     except Exception as e:
         return [{"error": str(e)}]
@@ -225,6 +226,8 @@ def cancel_order(order_id: int) -> dict:
         target = next((t for t in ib.openTrades() if t.order.orderId == order_id), None)
         if target is None:
             return {"error": "Order not found"}
+        if target.order.orderId == 0:
+            return {"error": "Manuell in TWS platzierte Orders können nicht per API storniert werden – bitte direkt in TWS stornieren."}
         # cancelOrder calls Client.sendMsg → must run on dedicated ibkr-loop thread.
         async def _cancel():
             ib.cancelOrder(target.order)
