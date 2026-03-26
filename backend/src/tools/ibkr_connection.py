@@ -32,6 +32,9 @@ MAX_RECONNECT_TRIES = 5
 # Backoff-Sequenz: Wartezeit in Sekunden zwischen Reconnect-Versuchen
 _BACKOFF = [30, 60, 120, 300, 600]
 ALERT_COOLDOWN = 3600  # Sekunden zwischen "Manuelle Aktion"-Alarmen
+# Saturday-Night-Fenster: Sa HH:MM – So HH:MM (konfigurierbar)
+SAT_NIGHT_START_HOUR = int(os.getenv("SAT_NIGHT_START_HOUR", "22"))
+SAT_NIGHT_END_HOUR   = int(os.getenv("SAT_NIGHT_END_HOUR",   "12"))  # Sonntag
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
@@ -69,9 +72,12 @@ _validate_trading_mode()
 
 
 def _is_saturday_night() -> bool:
-    """Samstag 22:00 – Sonntag 04:00: IB-Zwangsdisconnect-Fenster."""
+    """Samstag SAT_NIGHT_START_HOUR – Sonntag SAT_NIGHT_END_HOUR: IB-Zwangsdisconnect-Fenster."""
     now = datetime.now()
-    return (now.weekday() == 5 and now.hour >= 22) or (now.weekday() == 6 and now.hour < 4)
+    return (
+        (now.weekday() == 5 and now.hour >= SAT_NIGHT_START_HOUR)
+        or (now.weekday() == 6 and now.hour < SAT_NIGHT_END_HOUR)
+    )
 
 
 def send_telegram(message: str):
@@ -120,6 +126,7 @@ class IBKRConnectionManager:
         self._last_connect_attempt: float = 0.0   # epoch seconds
         self._connect_cooldown: float = 10.0       # seconds between retries
         self._last_alert_time: float = 0.0         # epoch seconds
+        self._saturday_alerted: bool = False       # einmaliger Alert pro Saturday-Disconnect
         self._connect_lock = threading.Lock()
         self._monitor_thread = None
         self._weekly_thread = None
@@ -222,6 +229,7 @@ class IBKRConnectionManager:
                     success = self._connect()
                     if success:
                         self._reconnect_tries = 0
+                        self._saturday_alerted = False
                         sleep_time = RECONNECT_INTERVAL
                         send_telegram(
                             "✅ <b>IBKR Gateway</b>\n"
@@ -232,20 +240,23 @@ class IBKRConnectionManager:
                         idx = min(self._reconnect_tries - 1, len(_BACKOFF) - 1)
                         sleep_time = _BACKOFF[idx]
 
-                        # Alert nur wenn Cooldown abgelaufen
-                        now = time.time()
-                        if now - self._last_alert_time >= ALERT_COOLDOWN:
-                            self._last_alert_time = now
-                            if _is_saturday_night():
-                                logger.warning("Saturday-Night-Disconnect erkannt")
+                        if _is_saturday_night():
+                            # Saturday-Disconnect: einmaliger Alert, danach Stille bis Reconnect
+                            if not self._saturday_alerted:
+                                self._saturday_alerted = True
+                                logger.warning("Saturday-Night-Disconnect erkannt – nur einmaliger Alert")
                                 send_telegram(
                                     "🌙 <b>IBKR Gateway – Samstag-Disconnect</b>\n\n"
                                     "IB Gateway hat die Verbindung für den wöchentlichen Neustart getrennt.\n"
-                                    "Auto-Reconnect läuft – wartet auf manuellen Re-Login.\n\n"
+                                    "Auto-Reconnect läuft im Hintergrund – bis zum Re-Login keine weiteren Alarme.\n\n"
                                     "➡️ Bitte nach dem Gateway-Neustart neu anmelden.\n"
                                     "Die Verbindung wird danach automatisch wiederhergestellt."
                                 )
-                            else:
+                        else:
+                            # Normaler Disconnect: Alert mit Cooldown
+                            now = time.time()
+                            if now - self._last_alert_time >= ALERT_COOLDOWN:
+                                self._last_alert_time = now
                                 logger.error(
                                     "Reconnect nach %d Versuchen fehlgeschlagen", self._reconnect_tries
                                 )
@@ -259,6 +270,7 @@ class IBKRConnectionManager:
                     if self._reconnect_tries > 0:
                         logger.info("Verbindung wiederhergestellt, Backoff zurückgesetzt")
                         self._reconnect_tries = 0
+                        self._saturday_alerted = False
                     sleep_time = RECONNECT_INTERVAL
 
         self._monitor_thread = threading.Thread(target=monitor, daemon=True)
