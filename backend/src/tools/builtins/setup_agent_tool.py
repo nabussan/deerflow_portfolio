@@ -3,6 +3,7 @@ import logging
 import yaml
 from langchain_core.messages import ToolMessage
 from langchain_core.tools import tool
+from langgraph.config import get_config
 from langgraph.prebuilt import ToolRuntime
 from langgraph.types import Command
 
@@ -24,7 +25,7 @@ def setup_agent(
         description: One-line description of what the agent does.
     """
 
-    agent_name: str | None = runtime.context.get("agent_name")
+    agent_name: str | None = get_config()["configurable"].get("agent_name")
 
     try:
         paths = get_paths()

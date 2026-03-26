@@ -13,6 +13,7 @@ tool_groups:
   - name: file:read
   - name: file:write
   - name: bash
+  - name: ibkr
 
 tools:
   - name: web_search
@@ -49,6 +50,38 @@ tools:
   - name: bash
     group: bash
     use: src.sandbox.tools:bash_tool
+
+  - name: get_account_info
+    group: ibkr
+    use: src.tools.ibkr_tool:get_account_info
+
+  - name: get_positions
+    group: ibkr
+    use: src.tools.ibkr_tool:get_positions
+
+  - name: get_market_data
+    group: ibkr
+    use: src.tools.ibkr_tool:get_market_data
+
+  - name: place_order
+    group: ibkr
+    use: src.tools.ibkr_tool:place_order
+
+  - name: get_open_orders
+    group: ibkr
+    use: src.tools.ibkr_tool:get_open_orders
+
+  - name: cancel_order
+    group: ibkr
+    use: src.tools.ibkr_tool:cancel_order
+
+  - name: get_forex_rate
+    group: ibkr
+    use: src.tools.ibkr_tool:get_forex_rate
+
+  - name: place_forex_order
+    group: ibkr
+    use: src.tools.ibkr_tool:place_forex_order
 
 sandbox:
   use: src.sandbox.local:LocalSandboxProvider

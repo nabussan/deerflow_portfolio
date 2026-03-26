@@ -108,30 +108,75 @@ sudo nginx -c /home/$(whoami)/deer-flow/docker/nginx/nginx.local.conf -p /usr/sh
 ./start.sh
 ```
 
-📺 Öffne: `http://localhost:3000/workspace`
+📺 Öffne: `http://localhost:2026/workspace`
 
 ---
 
 ## Remote-Zugriff (W541 als Server)
 
-### Windows Port-Weiterleitung (PowerShell als Administrator)
+### Zugriffs-URLs
+
+| Client | URL |
+|---|---|
+| Lokal (W541) | `http://localhost:2026/workspace` |
+| LAN (z.B. P53) | `http://<Windows-LAN-IP>:2026/workspace` |
+| Remote via Tailscale | `http://<Tailscale-IP>:2026/workspace` |
+
+> **Wichtig:** Von anderen Geräten im Netz immer die **Windows-Host-IP** verwenden (z.B. `192.168.1.x`), **nicht** die WSL2-IP (`172.24.x.x`) — die ist von außen nicht erreichbar.
+
+Windows-IPs ermitteln:
 ```powershell
-# WSL2-IP ermitteln
-wsl hostname -I
-
-# Ports weiterleiten
-netsh interface portproxy add v4tov4 listenport=3000 listenaddress=0.0.0.0 connectport=3000 connectaddress=<WSL2-IP>
-netsh interface portproxy add v4tov4 listenport=2026 listenaddress=0.0.0.0 connectport=2026 connectaddress=<WSL2-IP>
-netsh interface portproxy add v4tov4 listenport=8001 listenaddress=0.0.0.0 connectport=8001 connectaddress=<WSL2-IP>
-
-# Firewall
-New-NetFirewallRule -DisplayName "DeerFlow Frontend" -Direction Inbound -Protocol TCP -LocalPort 3000 -Action Allow
-New-NetFirewallRule -DisplayName "DeerFlow Gateway" -Direction Inbound -Protocol TCP -LocalPort 8001 -Action Allow
-New-NetFirewallRule -DisplayName "DeerFlow nginx" -Direction Inbound -Protocol TCP -LocalPort 2026 -Action Allow
+# In PowerShell auf W541:
+ipconfig | findstr /i "IPv4"
+# Tailscale-IP steht beim Adapter "Tailscale"
 ```
 
-> ⚠️ Die WSL2-IP ändert sich bei jedem Windows-Neustart!
-> Port-Weiterleitung muss nach jedem Neustart neu gesetzt werden (→ Autostart-Skript geplant für v0.2)
+### Windows Port-Weiterleitung einrichten (PowerShell als Administrator)
+
+> ⚠️ Die WSL2-IP ändert sich bei jedem Windows-Neustart — daher immer erst alte Regeln löschen, dann neu setzen!
+
+```powershell
+# WSL2-IP ermitteln
+$wslIP = (wsl hostname -I).Trim().Split(" ")[0]
+Write-Host "WSL2-IP: $wslIP"
+
+# Alte Regeln entfernen (wichtig: verhindert doppelte Einträge nach Neustart)
+netsh interface portproxy delete v4tov4 listenport=2026 listenaddress=0.0.0.0
+netsh interface portproxy delete v4tov4 listenport=8001 listenaddress=0.0.0.0
+netsh interface portproxy delete v4tov4 listenport=3000 listenaddress=0.0.0.0
+
+# Neue Regeln setzen: WSL2-Ports nach außen weiterleiten
+netsh interface portproxy add v4tov4 listenport=2026 listenaddress=0.0.0.0 connectport=2026 connectaddress=$wslIP
+netsh interface portproxy add v4tov4 listenport=8001 listenaddress=0.0.0.0 connectport=8001 connectaddress=$wslIP
+
+# IBC-Port: WSL2 → IB Gateway auf Windows (wird von wsl-startup.sh benötigt)
+# Achtung: listenaddress ist hier die vEthernet(WSL)-IP, NICHT 0.0.0.0
+$vethIP = (Get-NetIPAddress -InterfaceAlias 'vEthernet (WSL)' -AddressFamily IPv4).IPAddress
+netsh interface portproxy delete v4tov4 listenport=4002 listenaddress=$vethIP
+netsh interface portproxy add v4tov4 listenport=4002 listenaddress=$vethIP connectport=4002 connectaddress=127.0.0.1
+
+# Firewall-Regeln (einmalig, falls Windows Firewall aktiv)
+New-NetFirewallRule -DisplayName "DeerFlow Gateway" -Direction Inbound -Protocol TCP -LocalPort 8001 -Action Allow
+New-NetFirewallRule -DisplayName "DeerFlow nginx" -Direction Inbound -Protocol TCP -LocalPort 2026 -Action Allow
+
+# Aktuelle Regeln prüfen
+netsh interface portproxy show all
+```
+
+**Autostart einrichten** (einmalig, PowerShell als Administrator):
+
+Das Skript `C:\Users\<Dein-Username>\portproxy.ps1` mit obigem Inhalt anlegen, dann als geplante Aufgabe registrieren:
+
+```powershell
+$action = New-ScheduledTaskAction -Execute "powershell.exe" `
+    -Argument "-ExecutionPolicy Bypass -File C:\Users\$env:USERNAME\portproxy.ps1"
+$trigger = New-ScheduledTaskTrigger -AtLogOn
+$principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -RunLevel Highest
+Register-ScheduledTask -TaskName "DeerFlow-PortProxy" -Action $action `
+    -Trigger $trigger -Principal $principal -Force
+```
+
+Danach läuft die Port-Weiterleitung automatisch bei jedem Windows-Login.
 
 ---
 
@@ -170,7 +215,10 @@ Beim ersten Verbinden: Benutzername/Passwort des W541-Windows-Kontos eingeben, Z
 | IBKR Timeout | Windows-IP prüfen: `ip route | grep default | awk '{print $3}'` |
 | LangGraph startet nicht | `fuser -k 2024/tcp && ./start.sh` |
 | nginx Port belegt | `sudo nginx -s reload` |
-| WSL2-IP nach Neustart geändert | Port-Weiterleitung neu setzen |
+| WSL2-IP nach Neustart geändert | Port-Weiterleitung neu setzen (`portproxy.ps1`) — zuerst löschen, dann neu setzen! |
+| App von P53/anderem Gerät nicht erreichbar | Windows-LAN-IP verwenden, nicht WSL2-IP (`172.24.x.x`) |
+| IB Gateway nicht erreichbar (Port 4002) | vEthernet(WSL)-Regel fehlt — `portproxy.ps1` erneut ausführen |
+| nvm nicht gefunden beim Autostart | `wsl-startup.sh` sourced `.bashrc` nicht — nvm explizit laden: `source $NVM_DIR/nvm.sh` |
 
 ---
 

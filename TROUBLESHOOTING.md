@@ -1,14 +1,197 @@
-# Troubleshooting – DeerFlow Portfolio (W541 Setup)
+# Troubleshooting – DeerFlow Portfolio
 
-> Erfahrungen vom 2026-03-24 – W541 ThinkPad, Windows 10, WSL2, Ubuntu 24.04
+Schnelle Fehlerdiagnose. Ausführliche Hintergründe → `DEVGUIDE.md`.
 
 ---
 
-## 1. Energieverwaltung – PC schläft nach 3 Stunden ein
+## IBKR / ib_insync
 
-**Problem:** W541 geht in Ruhezustand, IB Gateway / TWS wird beendet.
+### „There is no current event loop in thread"
 
-**Ursache:** `powercfg` zeigte `HIBERNATEIDLE = 0x00002a30` (10.800 Sekunden = 3 Stunden).
+```
+RuntimeError: There is no current event loop in thread 'ThreadPoolExecutor-...'
+```
+
+**Ursache:** Ein synchroner ib_insync-Call (z.B. `reqMktData`, `placeOrder`) wurde direkt aus dem LangGraph-Thread-Pool aufgerufen. In Python 3.12 wirft `asyncio.get_event_loop()` dort eine Exception.
+
+**Fix bereits implementiert** (v0.1.2): Betroffene Calls laufen als `async`-Wrapper über `ibkr_submit()`.
+
+Falls der Fehler erneut auftritt bei einem neuen ib_insync-Call:
+```python
+# Falsch – direkt aus Thread-Pool:
+ticker = ib.reqMktData(contract, "", False, False)
+
+# Richtig – über ibkr-loop:
+async def _req():
+    return ib.reqMktData(contract, "", False, False)
+ticker = ibkr_submit(_req())
+```
+
+---
+
+### „coroutine was never awaited"
+
+```
+RuntimeWarning: coroutine 'IB.qualifyContractsAsync' was never awaited
+```
+
+**Ursache:** Eine ib_insync-Coroutine wurde mit `ib.qualifyContracts()` (sync) statt mit `ibkr_submit(ib.qualifyContractsAsync())` aufgerufen, oder der Loop war noch nicht bereit.
+
+**Fix:** Alle Coroutinen via `ibkr_submit()` ausführen:
+```python
+ibkr_submit(ib.qualifyContractsAsync(contract))
+```
+
+---
+
+### IBKR Gateway nicht verbunden
+
+```
+ConnectionError: IBKR Gateway nicht verbunden
+```
+
+**Checkliste:**
+1. IB Gateway läuft auf Windows? → Taskleiste prüfen
+2. Port 4002 erreichbar? → `nc -zv <IBKR_HOST> 4002`
+3. Saturday-Night-Disconnect? → IB Gateway manuell neu einloggen
+4. `.env` korrekt? → `IBKR_HOST`, `IBKR_PORT=4002`, `IBKR_MODE=paper`
+5. Logs prüfen: `tail -50 backend/logs/ibkr_connection.log`
+
+---
+
+### IB Gateway verbindet TCP, aber API-Handshake schlägt still fehl (`b''`)
+
+**Symptom:** `nc -zv <IBKR_HOST> 4002` → `succeeded`, aber `ib.connect()` gibt `b''` zurück. Kein Fehler, kein Timeout, keine Verbindung.
+
+**Ursache:** WSL2-Client-IP ist nicht in der Trusted-IP-Liste von IB Gateway.
+
+**Diagnose:**
+```bash
+hostname -I   # → zeigt deine echte WSL2-Client-IP (z.B. 172.24.142.255)
+```
+
+Die IP aus `ip route | grep default` (→ `172.24.128.1`) ist die **Windows-Host-IP**, aber nicht die IP, die IB Gateway als Verbindungsquelle sieht — das ist die WSL2-eigene IP aus `hostname -I`.
+
+**Fix:** In IB Gateway: `Configure → API → Trusted IPs` → `172.24.0.0/16` eintragen.
+
+---
+
+### Services stürzen alle ~10–30 Sekunden ab (502 Bad Gateway)
+
+**Symptom:** `langgraph dev` gibt `2 changes detected – reloading` aus und startet neu. Laufende Chat-Requests brechen ab.
+
+**Ursache:** watchfiles-Hot-Reload erkennt in WSL2 auch Metadaten-Änderungen (z.B. Log-Writes) als Code-Änderungen.
+
+**Fix:** `start.sh` und `scripts/restart.sh` müssen `--no-reload` verwenden:
+```bash
+uv run langgraph dev --port 2024 --no-browser --allow-blocking --no-reload
+```
+
+**Bereits in `start.sh` eingetragen** (v0.1.3). Nach `make stop && make dev` oder `./start.sh` ist der Fix aktiv.
+
+---
+
+### Kurs-Abfrage liefert nur `close`, kein bid/ask
+
+**Ursache:** Markt geschlossen (z.B. nach 22:00 Uhr oder Wochenende). Das Feld `market_closed: true` wird gesetzt.
+
+**Normal** – `close` enthält den letzten Schlusskurs.
+
+---
+
+## xAI / Grok
+
+### 400 „Each message must have at least one content element"
+
+```
+openai.BadRequestError: Error code: 400
+'Each message must have at least one content element'
+```
+
+**Ursache:** Eine `AIMessage` mit `tool_calls` hat leeres `content`-Feld. xAI/Grok lehnt das ab.
+
+**Fix bereits implementiert** (v0.1.2): `DanglingToolCallMiddleware._fix_empty_ai_content()` ersetzt leeren Content vor dem API-Call durch `" "`.
+
+Falls der Fehler erneut auftritt: prüfen ob eine neue Middleware die Messages vor `DanglingToolCallMiddleware` verändert.
+
+---
+
+### Agent verwendet Web-Suche statt IBKR-Tools
+
+**Ursache A:** Backend läuft noch mit altem Code → `make stop && make dev`
+
+**Ursache B:** Tool nicht in `config.yaml` registriert.
+
+Prüfen:
+```bash
+grep "ibkr\|place_order\|get_forex" config.yaml
+```
+
+Fehlt ein Tool, eintragen:
+```yaml
+tools:
+  - name: mein_neues_tool
+    group: ibkr
+    use: src.tools.ibkr_tool:mein_neues_tool
+```
+
+Dann Backend neu starten.
+
+---
+
+## Backend / Services
+
+### LangGraph startet nicht
+
+```bash
+# Logs prüfen
+cat /tmp/deerflow_startup.log
+tail -50 backend/logs/backend.log
+
+# Manuell starten für detaillierte Fehlermeldung
+cd backend && uv run langgraph dev
+```
+
+**Häufige Ursachen:**
+- `config.yaml` Syntaxfehler (YAML-Einrückung!)
+- Fehlende Env-Variable (`$XAI_API_KEY` nicht gesetzt)
+- Port 2024 bereits belegt → `lsof -i :2024`
+
+---
+
+### „Environment variable XAI_API_KEY not found"
+
+`.env` Datei fehlt oder nicht geladen:
+```bash
+# Prüfen
+cat backend/.env | grep XAI
+
+# Notfalls manuell exportieren
+export XAI_API_KEY=xai-...
+```
+
+---
+
+### Tests schlagen fehl wegen ibkr_submit
+
+Wenn neue ib_insync-Synchron-Calls hinzugefügt werden, muss die Test-Fixture in `test_ibkr_tools.py` wissen, ob der Wrapper ausgeführt werden soll:
+
+```python
+# In patch_validate fixture:
+# - co_name == "sleep"        → schließen (kein Ausführen)
+# - co_name.endswith("Async") → schließen (ib_insync async, gibt nichts zurück)
+# - alles andere              → auf frischem Event-Loop ausführen (z.B. _req, _place)
+```
+
+---
+
+## Windows / WSL2 Setup (W541-Lektionen)
+
+Erfahrungen aus der Ersteinrichtung — erspart Umwege.
+
+### Energieverwaltung: PC schläft ein und beendet IB Gateway
+
+**Problem:** W541 geht in Ruhezustand, IB Gateway wird beendet.
 
 **Lösung (PowerShell als Admin):**
 ```powershell
@@ -27,171 +210,57 @@ powercfg /query SCHEME_CURRENT SUB_SLEEP
 
 ---
 
-## 2. IB Gateway vs. TWS
-
-**Problem:** IB Gateway war nach Neustart nicht mehr vorhanden.
-
-**Ursache:** IB Gateway wurde nicht installiert, sondern nur direkt als heruntergeladene Java-App gestartet. Nach dem Neustart war der Prozess weg.
+### IB Gateway vs. TWS
 
 **Erkenntnis:** IBKR hat IB Gateway und TWS zusammengeführt. Es gibt weiterhin einen separaten IB Gateway Installer:
 ```
 https://download2.interactivebrokers.com/installers/ibgateway/stable-standalone/ibgateway-stable-standalone-windows-x64.exe
 ```
 
-**WICHTIG – IB Gateway mit LYNX Broker:** Bei LYNX-Konten handelt es sich um eine White-Label-Version von IBKR. IB Gateway verbindet sich technisch korrekt (grüner Status), akzeptiert aber den API-Handshake von WSL2 nicht zuverlässig (TimeoutError bei `apiStart`). Ursache unklar – möglicherweise LYNX-spezifische Einschränkung.
-
-**Empfehlung: TWS verwenden** – TWS (installiert unter `C:\Jts\tws.exe`) funktioniert stabil als API-Server auf Port 7496.
+**WICHTIG – IB Gateway mit LYNX Broker:** Bei LYNX-Konten (White-Label IBKR) verbindet sich IB Gateway technisch korrekt (grüner Status), akzeptiert aber den API-Handshake von WSL2 nicht zuverlässig (TimeoutError bei `apiStart`). Workaround: TWS (`C:\Jts\tws.exe`) verwenden (Port 7496).
 
 ---
 
-## 3. Windows Firewall blockiert WSL2 → TWS
+### Windows Firewall blockiert WSL2 → IB Gateway / TWS
 
-**Problem:** WSL2 kann Port 7496 nicht erreichen, obwohl `netstat` zeigt dass TWS auf `0.0.0.0:7496` lauscht.
-
-**Ursache:** Windows Firewall behandelt den virtuellen `vEthernet (WSL)` Adapter als eigenes Netzwerksegment mit separaten Regeln.
+**Ursache:** Windows Firewall behandelt den `vEthernet (WSL)` Adapter als eigenes Netzwerksegment.
 
 **Was nicht funktioniert:**
-- `netsh advfirewall firewall add rule ... profile=any` – greift nicht für WSL2-Adapter
-- `New-NetFirewallRule ... -InterfaceAlias "vEthernet (WSL)"` – wird nicht persistent nach Neustart
+- `netsh advfirewall firewall add rule ... profile=any` — greift nicht für WSL2-Adapter
+- `New-NetFirewallRule ... -InterfaceAlias "vEthernet (WSL)"` — wird nicht persistent nach Neustart
 
 **Was funktioniert:** Firewall komplett deaktivieren (akzeptabel da W541 hinter Router/NAT und Tailscale geschützt ist):
 ```powershell
 Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled False
 ```
 
-**Persistent machen via Scheduled Task (PowerShell als Admin):**
+**Persistent via Scheduled Task:**
 ```powershell
 $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-Command `"Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled False`""
-$trigger = New-ScheduledTaskTrigger -AtLogOn -User "deerflow"
-$principal = New-ScheduledTaskPrincipal -UserId "deerflow" -RunLevel Highest
+$trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+$principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -RunLevel Highest
 Register-ScheduledTask -TaskName "WSL2-Firewall-Disable" -Action $action -Trigger $trigger -Principal $principal
 ```
 
 ---
 
-## 4. Port-Proxy schadet mehr als er nützt
+### Port-Proxy für Port 7496 schadet mehr als er nützt
 
-**Problem:** Port-Proxy `172.24.128.1:7496 → 127.0.0.1:7496` verhindert statt ermöglicht die Verbindung.
+**Erkenntnis:** TWS auf `0.0.0.0:7496` ist direkt von WSL2 erreichbar sobald die Firewall deaktiviert ist. Ein Port-Proxy auf `172.24.128.1:7496` blockiert die Verbindung statt sie zu ermöglichen.
 
-**Erkenntnis:** TWS auf `0.0.0.0:7496` ist direkt von WSL2 erreichbar sobald die Firewall deaktiviert ist. Kein Port-Proxy nötig.
-
-**Sicherstellen dass kein Port-Proxy für 7496 existiert (PowerShell):**
 ```powershell
+# Sicherstellen dass kein Proxy für 7496 existiert:
 netsh interface portproxy show all
 netsh interface portproxy delete v4tov4 listenaddress=172.24.128.1 listenport=7496
 ```
 
 ---
 
-## 5. TWS API-Einstellungen
+## Bekannte Einschränkungen
 
-**Einmalig einrichten unter:** `Edit → Global Configuration → API → Settings` → Apply → OK
-
-**Korrekte Einstellungen:**
-- ✅ ActiveX- und Socket-Clients aktivieren
-- ❌ Schreibgeschützte API (deaktiviert)
-- ❌ Nur Verbindungen vom lokalen Host zulassen (deaktiviert)
-- Socket Port: `7496`
-- Vertrauenswürdige IPs: `172.24.128.0/24`, `172.24.142.0/24`
-
-Diese Einstellungen werden persistent gespeichert und müssen nicht nach jedem Neustart wiederholt werden.
-
----
-
-## 6. `dotenv` lädt falschen Pfad
-
-**Problem:** `ibkr_connection.py` hatte hardcoded den falschen Pfad:
-```python
-load_dotenv("/home/python/deer-flow/backend/.env")  # FALSCH
-```
-
-**Fix:**
-```python
-load_dotenv()  # Lädt automatisch aus dem aktuellen Verzeichnis
-```
-
----
-
-## 7. `ib_insync` Event Loop Konflikt mit uvloop (LangGraph)
-
-**Problem:** LangGraph nutzt `uvloop`. `ib_insync` braucht einen Standard-asyncio-Loop. Tools schlagen mit `"There is no current event loop in thread"` fehl.
-
-**Was nicht funktioniert:**
-- `nest_asyncio.apply()` – inkompatibel mit uvloop (`ValueError: Can't patch loop of type uvloop.Loop`)
-- `asyncio.set_event_loop(asyncio.new_event_loop())` in `get_connection()` – reicht nicht
-- `ib.sleep()` statt `time.sleep()` – blockiert uvloop
-- `t.join()` im Worker-Thread – blockiert uvloop-Thread
-
-**Was funktioniert:** Dedizierter Worker-Thread mit eigenem asyncio-Loop und `queue.get()` statt `t.join()`:
-```python
-import threading, queue, asyncio, random
-
-def get_market_data(symbol, exchange="SMART", currency="USD"):
-    result_queue = queue.Queue()
-    def _worker():
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            ib = IB()
-            ib.connect(host, port, clientId=random.randint(50, 99), timeout=10)
-            # ... IB calls ...
-            result_queue.put(result)
-        except Exception as e:
-            result_queue.put({"error": str(e)})
-        finally:
-            loop.close()
-    t = threading.Thread(target=_worker, daemon=True)
-    t.start()
-    try:
-        return result_queue.get(timeout=20)  # NICHT t.join() verwenden
-    except Exception:
-        return {"error": "Timeout"}
-```
-
-**Wichtig:** Jeder parallele Aufruf braucht eine eindeutige `clientId` (z.B. `random.randint(50, 99)`).
-
----
-
-## 8. Offene Probleme (Stand 2026-03-24)
-
-### `get_open_orders`, `place_order`, `cancel_order` funktionieren nicht im UI
-
-**Status:** ⚠️ Offen
-
-**Symptom:** Agent ruft das Tool auf, aber keine Reaktion im Frontend.
-
-**Vermutung:** Dieselbe Event-Loop-Problematik wie bei `get_market_data` vor dem Fix.
-
-**TODO:** Worker-Thread-Pattern aus `get_market_data` auf alle verbleibenden Tools übertragen.
-
-### IB Gateway (LYNX) akzeptiert keinen API-Handshake von WSL2
-
-**Status:** ⚠️ Offen / Workaround: TWS nutzen
-
-**Symptom:** `nc` erreicht Port 4002, aber `ib_insync` schlägt bei `apiStart` mit TimeoutError fehl.
-
-**Nächste Schritte:**
-- IBC (IB Controller) für automatischen TWS-Login testen: https://github.com/IbcAlpha/IBC
-- IBKR/LYNX Support kontaktieren ob API-Verbindungen von WSL2-IPs unterstützt werden
-
----
-
-## Funktionierende Konfiguration (Stand 2026-03-24)
-
-| Komponente | Wert |
+| Einschränkung | Workaround |
 |---|---|
-| Broker-App | TWS (`C:\Jts\tws.exe`) |
-| API Port | 7496 |
-| IBKR_HOST | 172.24.128.1 (Windows-IP aus WSL2) |
-| Firewall | Deaktiviert (Scheduled Task bei Login) |
-| Port-Proxy | Keiner für Port 7496 |
-| Autostart | TWS-Autostart Scheduled Task |
-
-| Tool | Status |
-|---|---|
-| `get_account_info` | ✅ |
-| `get_positions` | ✅ |
-| `get_market_data` | ✅ |
-| `get_open_orders` | ⚠️ offen |
-| `place_order` | ⚠️ offen |
-| `cancel_order` | ⚠️ offen |
+| IB Gateway Sa.-Nacht-Disconnect (23:00) | Manuelles Re-Login, Auto-Reconnect startet danach |
+| Forex-Positionen in `get_positions` haben `secType=CASH` | Normales IBKR-Verhalten, kein Bug |
+| Marktdaten nach Börsenschluss nur als `close` | `market_closed: true` Flag auswerten |
+| xAI lehnt leere AIMessage-Content ab | Fix in `DanglingToolCallMiddleware` (v0.1.2) |

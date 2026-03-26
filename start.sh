@@ -4,7 +4,7 @@ echo "Starting DeerFlow..."
 
 # LangGraph Backend
 cd $(eval echo ~$(whoami))/deer-flow/backend
-uv run langgraph dev --port 2024 --no-browser --allow-blocking > /tmp/langgraph.log 2>&1 &
+uv run langgraph dev --port 2024 --no-browser --allow-blocking --no-reload > /tmp/langgraph.log 2>&1 &
 echo "LangGraph PID: $!"
 sleep 5
 

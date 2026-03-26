@@ -1,5 +1,47 @@
 # Changelog
 
+## [0.1.3] - 2026-03-26
+
+### Infrastructure
+- **IB Gateway Migration abgeschlossen (TWS → IB Gateway)**: Broker-Verbindung läuft jetzt auf Port 4002 (Paper). IB Gateway benötigt ~200 MB RAM statt ~1 GB (TWS) und ist headless-fähig für 24/7-Betrieb.
+- **IBGateway-Autostart Scheduled Task**: Windows Scheduled Task `IBGateway-Autostart` ersetzt `TWS-Autostart`. IB Gateway startet automatisch bei Windows-Anmeldung.
+- **`start.sh --no-reload`**: `langgraph dev` wird mit `--no-reload` gestartet. Behebt Abstürze durch watchfiles-Hot-Reload, der alle ~10 s Dateiänderungen erkannte und den Server neu startete.
+- **`wsl-startup.sh` Reihenfolge**: `IBKR_HOST`-Update erfolgt jetzt **vor** dem DeerFlow-Start — verhindert, dass beim Systemstart mit veralteter Windows-IP verbunden wird.
+
+### Root Cause Analysis: IB Gateway „silent disconnect"
+- **Symptom:** TCP-Verbindung aufgebaut, API-Handshake schlägt fehl (`b''`-Antwort).
+- **Ursache:** WSL2-Client-IP (`172.24.142.255`) war nicht in der Trusted-IP-Liste von IB Gateway eingetragen — nur die Windows-Host-IP (`172.24.128.1`). IB Gateway schließt die Verbindung nach dem TCP-Handshake still, ohne Fehlermeldung.
+- **Fix:** WSL2-Subnetz `172.24.0.0/16` in IB Gateway unter `Configure → API → Trusted IPs` eintragen.
+- **Diagnose:** `hostname -I` in WSL2 zeigt die tatsächliche Client-IP (≠ Windows-IP!).
+
+### Phase 3 – Funktionstest (alle bestanden)
+| Test | Ergebnis |
+|---|---|
+| Kontostand | ✅ NetLiquidation + BuyingPower |
+| Positionen | ✅ 3 Positionen + Forex-Cash |
+| TSLA-Kurs | ✅ bid/ask bzw. market_closed |
+| Kaufe 1 AAPL | ✅ orderId + Status Submitted |
+| EUR/USD Kurs | ✅ bid/ask/mid |
+| Kaufe 1000 EUR | ✅ orderId + Status Submitted |
+
+
+## [0.1.2] - 2026-03-25
+
+### Added
+- **Forex Trading**: `get_forex_rate(pair)` – Bid/Ask/Mid für beliebige Währungspaare (EURUSD, GBPUSD, USDJPY …)
+- **Forex Trading**: `place_forex_order(pair, action, quantity, order_type, limit_price)` – Market- und Limit-Orders via IBKR IDEALPRO; Menge in der Basiswährung (z.B. 10 000 EUR bei EURUSD)
+- Alle 8 IBKR-Tools in `config.yaml` unter Tool-Gruppe `ibkr` registriert
+
+### Fixed
+- **„There is no current event loop in thread"** (`RuntimeError` in Python 3.12): `ib_insync`'s `Client.sendMsg()` ruft intern `asyncio.get_event_loop()` auf, das im LangGraph-Thread-Pool wirft. Fix: `reqMktData()`, `placeOrder()` und `cancelOrder()` laufen jetzt als `async`-Wrapper über `ibkr_submit()` auf dem dedizierten `ibkr-loop`-Thread.
+- **xAI/Grok 400 „Each message must have at least one content element"**: `AIMessage` nach Tool-Call hat leeres `content`-Feld, das xAI ablehnt. Fix in `DanglingToolCallMiddleware._fix_empty_ai_content()`: leerer Content wird vor dem Model-Call durch ein Leerzeichen ersetzt.
+- **IBKR-Tools nicht erreichbar**: Tools waren implementiert, aber nicht in `config.yaml` eingetragen → Agent kannte sie nicht. Behoben durch explizite Registrierung aller 8 Tools.
+
+### Tests
+- 9 neue Unit-Tests für `get_forex_rate` und `place_forex_order` (SK-08/SK-09)
+- Test-Fixture `patch_validate` in `test_ibkr_tools.py` erweitert: Wrapper-Coroutinen (`_req`, `_place`, `_cancel`) werden auf frischem Event-Loop ausgeführt; `sleep`- und `*Async`-Coroutinen werden ohne Ausführung geschlossen
+
+
 ## [0.1.1] - 2026-03-25
 
 ### Security

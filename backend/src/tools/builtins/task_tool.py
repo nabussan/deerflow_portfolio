@@ -85,7 +85,7 @@ def task_tool(
     if runtime is not None:
         sandbox_state = runtime.state.get("sandbox")
         thread_data = runtime.state.get("thread_data")
-        thread_id = runtime.context.get("thread_id")
+        thread_id = runtime.config.get("configurable", {}).get("thread_id") or (getattr(runtime, "context", None) or {}).get("thread_id")
 
         # Try to get parent model from configurable
         metadata = runtime.config.get("metadata", {})
