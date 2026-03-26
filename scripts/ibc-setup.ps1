@@ -44,8 +44,21 @@ if (-not (Test-Path $IbcDir)) {
         Invoke-WebRequest -Uri $Asset.browser_download_url -OutFile $ZipPath -UseBasicParsing
 
         Write-Host "Entpacke nach $IbcDir ..."
-        Expand-Archive -Path $ZipPath -DestinationPath $IbcDir -Force
+        $TempExtract = Join-Path $env:TEMP "ibc-extract"
+        if (Test-Path $TempExtract) { Remove-Item $TempExtract -Recurse -Force }
+        Expand-Archive -Path $ZipPath -DestinationPath $TempExtract -Force
         Remove-Item $ZipPath
+
+        # Inhalt aus eventuellem Unterordner direkt nach $IbcDir verschieben
+        $ExtractedItems = Get-ChildItem -Path $TempExtract
+        if ($ExtractedItems.Count -eq 1 -and $ExtractedItems[0].PSIsContainer) {
+            $SourceDir = $ExtractedItems[0].FullName
+        } else {
+            $SourceDir = $TempExtract
+        }
+        New-Item -ItemType Directory -Path $IbcDir -Force | Out-Null
+        Get-ChildItem -Path $SourceDir | Move-Item -Destination $IbcDir -Force
+        Remove-Item $TempExtract -Recurse -Force
 
         Write-Host "IBC $($Release.tag_name) installiert." -ForegroundColor Green
     } catch {
